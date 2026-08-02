@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
 import { CESDR_ITEMS, CESDR_OPTIONS, CESDR_HIGH_RISK_ITEM, CESDR_HIGH_RISK_THRESHOLD } from '@/lib/instruments'
@@ -28,6 +28,21 @@ export function CesdrScreen() {
   // Restore previously saved answer from store
   const value = item ? cesdr[item.id] : undefined
 
+  // PERF (audit finding): previously, selecting an answer scheduled a save
+  // via setTimeout(100ms), and clicking "Lanjut"/"Kembali" immediately
+  // after fired ANOTHER save with the exact same answers — so every
+  // question step sent two nearly-identical PATCH requests to the server.
+  // We keep the short-delay draft save (so an answer isn't lost if the
+  // respondent closes the tab before navigating), but cancel it whenever a
+  // navigation save is about to send the same data anyway.
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelPendingDraft = useCallback(() => {
+    if (draftTimer.current) {
+      clearTimeout(draftTimer.current)
+      draftTimer.current = null
+    }
+  }, [])
+
   // Save draft to server (without advancing)
   const saveDraft = useCallback(() => {
     fetch('/api/save', {
@@ -39,6 +54,7 @@ export function CesdrScreen() {
 
   // Navigate to next question (only via button)
   const goNext = useCallback(() => {
+    cancelPendingDraft()
     if (idx + 1 < TOTAL) {
       setIdx(idx + 1)
       fetch('/api/save', {
@@ -58,10 +74,11 @@ export function CesdrScreen() {
         setShowComplete(true)
       })
     }
-  }, [idx, cesdr])
+  }, [idx, cesdr, cancelPendingDraft])
 
   // Navigate to previous question
   const goPrev = useCallback(() => {
+    cancelPendingDraft()
     if (idx > 0) {
       setIdx(idx - 1)
       fetch('/api/save', {
@@ -70,13 +87,15 @@ export function CesdrScreen() {
         body: JSON.stringify({ stageIndex: idx - 1, stage: 'cesdr', answers: cesdr }),
       })
     }
-  }, [idx, cesdr])
+  }, [idx, cesdr, cancelPendingDraft])
 
   // Select answer — saves draft, stays on same page (NO auto-advance)
   function handleSelect(v: number) {
     patchAnswers('cesdr', item.id, v)
-    // Save draft immediately
-    setTimeout(() => saveDraft(), 100)
+    // Save draft shortly after selecting, unless the respondent navigates
+    // first (goNext/goPrev cancel this and send fresh data themselves).
+    cancelPendingDraft()
+    draftTimer.current = setTimeout(() => saveDraft(), 100)
 
     // Check high-risk condition (item 18)
     if (item.id === CESDR_HIGH_RISK_ITEM && v >= CESDR_HIGH_RISK_THRESHOLD && !highRiskAcknowledged) {

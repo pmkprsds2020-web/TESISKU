@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -24,8 +25,26 @@ import { RespondentDetailDialog } from '@/components/teenmind/respondent-detail-
 import { CompareDialog } from '@/components/teenmind/compare-dialog'
 import { CodesPanel } from '@/components/teenmind/codes-panel'
 import { SettingsPanel } from '@/components/teenmind/settings-panel'
-import { CohortPanel } from '@/components/teenmind/cohort-panel'
 import { Skeleton } from '@/components/ui/skeleton'
+
+// PERF (audit finding): CohortPanel alone statically imports 9 heavy
+// statistics panels (crosstab, regression, logistic, reliability, factor,
+// cluster, mediation, moderation, partial-corr) which together with
+// recharts made up a large chunk of the admin bundle — loaded immediately
+// whenever ANY admin tab opened, even if "Cohort" was never clicked.
+// Loading it lazily means that weight is only fetched when the researcher
+// actually opens the Cohort/Advanced Stats tab.
+const CohortPanel = dynamic(
+  () => import('@/components/teenmind/cohort-panel').then((m) => m.CohortPanel),
+  {
+    loading: () => (
+      <div className="space-y-3">
+        <Skeleton className="h-40 w-full rounded-2xl" />
+        <Skeleton className="h-40 w-full rounded-2xl" />
+      </div>
+    ),
+  }
+)
 
 type Stats = {
   overview: {
@@ -126,10 +145,39 @@ export function AdminDashboard() {
   async function handleAiAnalytics() {
     setAiLoading(true)
     setAiError(null)
+    setAiNarrative('')
     try {
       const res = await fetch('/api/admin/ai-analytics', { method: 'POST' })
-      const data = await res.json()
-      setAiNarrative(data.narrative)
+      const contentType = res.headers.get('content-type') ?? ''
+
+      // Streaming path: read plain-text chunks as they arrive so the
+      // narrative renders progressively instead of waiting for the whole
+      // generation to finish.
+      if (contentType.includes('text/plain') && res.body) {
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        // First chunk arriving flips us out of the "generating" skeleton.
+        let receivedAny = false
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const chunk = decoder.decode(value, { stream: true })
+          if (chunk) {
+            if (!receivedAny) {
+              receivedAny = true
+              setAiLoading(false)
+            }
+            setAiNarrative((prev) => (prev ?? '') + chunk)
+          }
+        }
+        if (!receivedAny) {
+          setAiNarrative('Tidak dapat menghasilkan ringkasan AI saat ini.')
+        }
+      } else {
+        // Fallback: server returned a plain JSON response (non-streamed).
+        const data = await res.json()
+        setAiNarrative(data.narrative)
+      }
     } catch {
       setAiError('Gagal menghubungi layanan AI.')
     } finally {

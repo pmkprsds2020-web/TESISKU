@@ -16,10 +16,26 @@ type SaveBody = {
   complete?: boolean
 }
 
-// Helper: sync respondent to Supabase after any update (uses code, not id)
-async function syncRespondentToSupabase(r: Awaited<ReturnType<typeof db.respondent.findUnique>>, overrides?: Record<string, unknown>) {
+// PERF (audit finding): every Supabase mirror write in this route used to be
+// `await`-ed, meaning the HTTP response to the browser waited on a network
+// round trip to Supabase's REST API on top of the actual Postgres write via
+// Prisma. Since nothing in this app reads the mirrored Supabase tables (see
+// src/lib/supabase-sync.ts), there is no correctness reason to block the
+// response on them. `fireAndForget` starts the write and lets the response
+// return immediately; failures are still logged, just asynchronously.
+function fireAndForget(p: Promise<unknown>) {
+  p.catch((err) => console.error("[save] background sync failed:", err))
+}
+
+function devLog(...args: unknown[]) {
+  if (process.env.NODE_ENV === "development") console.log(...args)
+}
+
+// Helper: sync respondent to Supabase after any update (uses code, not id).
+// Non-blocking by design — callers should NOT await this on the response path.
+function syncRespondentToSupabase(r: Awaited<ReturnType<typeof db.respondent.findUnique>>, overrides?: Record<string, unknown>) {
   if (!r) return
-  await syncRespondent({
+  fireAndForget(syncRespondent({
     code: r.code,
     school: r.school,
     status: (overrides?.status as string) ?? r.status,
@@ -29,7 +45,7 @@ async function syncRespondentToSupabase(r: Awaited<ReturnType<typeof db.responde
     consent_given: (overrides?.consentGiven as boolean) ?? r.consentGiven,
     started_at: r.startedAt.toISOString(),
     completed_at: r.completedAt?.toISOString() ?? null,
-  })
+  }))
 }
 
 // POST /api/save — stage completion (Lanjut button on last question)
@@ -39,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json()) as SaveBody
   const { stage, answers, stageIndex, complete } = body
-  console.log("[save/POST] stage:", stage, "code:", code, "answers keys:", Object.keys(answers ?? {}).length)
+  devLog("[save/POST] stage:", stage, "code:", code, "answers keys:", Object.keys(answers ?? {}).length)
 
   const r = await db.respondent.findUnique({ where: { code } })
   if (!r) return NextResponse.json({ error: "not_found" }, { status: 404 })
@@ -52,22 +68,26 @@ export async function POST(req: NextRequest) {
     next.currentStage = "demographics"
     next.stageIndex = 0
     await db.auditLog.create({ data: { respondentId: r.id, action: "stage_complete", detail: "consent" } })
-    await syncAuditLog(r.code, "stage_complete", "consent")
+    fireAndForget(syncAuditLog(r.code, "stage_complete", "consent"))
 
   // ─── Demographics ─────────────────────────────────────────────────
   } else if (stage === "demographics") {
     const data = JSON.stringify(answers)
-    await db.demographic.upsert({
-      where: { respondentId: r.id },
-      update: { data },
-      create: { respondentId: r.id, data },
-    })
-    // Sync to Supabase (data stored as jsonb object, not string)
-    await syncDemographics(r.code, answers)
     next.currentStage = "cesdr"
     next.stageIndex = 0
-    await db.auditLog.create({ data: { respondentId: r.id, action: "stage_complete", detail: "demographics" } })
-    await syncAuditLog(r.code, "stage_complete", "demographics")
+    // PERF: these two writes touch different tables and don't depend on
+    // each other's result — run them concurrently instead of sequentially.
+    await Promise.all([
+      db.demographic.upsert({
+        where: { respondentId: r.id },
+        update: { data },
+        create: { respondentId: r.id, data },
+      }),
+      db.auditLog.create({ data: { respondentId: r.id, action: "stage_complete", detail: "demographics" } }),
+    ])
+    // Sync to Supabase (data stored as jsonb object, not string)
+    fireAndForget(syncDemographics(r.code, answers))
+    fireAndForget(syncAuditLog(r.code, "stage_complete", "demographics"))
 
   // ─── CESD-R ───────────────────────────────────────────────────────
   } else if (stage === "cesdr") {
@@ -80,82 +100,90 @@ export async function POST(req: NextRequest) {
       create: { respondentId: r.id, answers: json, totalScore: total, highRisk },
     })
     // Sync to Supabase
-    await syncCesdrAnswers(r.code, a, total, highRisk)
+    fireAndForget(syncCesdrAnswers(r.code, a, total, highRisk))
     if (highRisk && !r.highRisk) {
       next.highRisk = true
       await db.auditLog.create({ data: { respondentId: r.id, action: "high_risk_flag", detail: `CESD-R item ${CESDR_HIGH_RISK_ITEM} >= ${CESDR_HIGH_RISK_THRESHOLD}` } })
-      await syncAuditLog(r.code, "high_risk_flag", `CESD-R item ${CESDR_HIGH_RISK_ITEM} >= ${CESDR_HIGH_RISK_THRESHOLD}`)
+      fireAndForget(syncAuditLog(r.code, "high_risk_flag", `CESD-R item ${CESDR_HIGH_RISK_ITEM} >= ${CESDR_HIGH_RISK_THRESHOLD}`))
     }
     next.currentStage = "psqi"
     next.stageIndex = 0
     await db.auditLog.create({ data: { respondentId: r.id, action: "stage_complete", detail: "cesdr" } })
-    await syncAuditLog(r.code, "stage_complete", "cesdr")
+    fireAndForget(syncAuditLog(r.code, "stage_complete", "cesdr"))
 
   // ─── PSQI ─────────────────────────────────────────────────────────
   } else if (stage === "psqi") {
     const a = answers as Record<string, number | string>
     const { total } = scorePsqi(a)
     const json = JSON.stringify(a)
-    await db.psqiAnswer.upsert({
-      where: { respondentId: r.id },
-      update: { answers: json, totalScore: total },
-      create: { respondentId: r.id, answers: json, totalScore: total },
-    })
-    // Sync to Supabase
-    await syncPsqiAnswers(r.code, a, total)
     next.currentStage = "screentime"
     next.stageIndex = 0
-    await db.auditLog.create({ data: { respondentId: r.id, action: "stage_complete", detail: "psqi" } })
-    await syncAuditLog(r.code, "stage_complete", "psqi")
+    await Promise.all([
+      db.psqiAnswer.upsert({
+        where: { respondentId: r.id },
+        update: { answers: json, totalScore: total },
+        create: { respondentId: r.id, answers: json, totalScore: total },
+      }),
+      db.auditLog.create({ data: { respondentId: r.id, action: "stage_complete", detail: "psqi" } }),
+    ])
+    // Sync to Supabase
+    fireAndForget(syncPsqiAnswers(r.code, a, total))
+    fireAndForget(syncAuditLog(r.code, "stage_complete", "psqi"))
 
   // ─── Screen Time ──────────────────────────────────────────────────
   } else if (stage === "screentime") {
     const json = JSON.stringify(answers)
-    await db.screenTimeAnswer.upsert({
-      where: { respondentId: r.id },
-      update: { answers: json },
-      create: { respondentId: r.id, answers: json },
-    })
-    // Sync to Supabase
-    await syncScreentimeAnswers(r.code, answers)
     next.currentStage = "mos"
     next.stageIndex = 0
-    await db.auditLog.create({ data: { respondentId: r.id, action: "stage_complete", detail: "screentime" } })
-    await syncAuditLog(r.code, "stage_complete", "screentime")
+    await Promise.all([
+      db.screenTimeAnswer.upsert({
+        where: { respondentId: r.id },
+        update: { answers: json },
+        create: { respondentId: r.id, answers: json },
+      }),
+      db.auditLog.create({ data: { respondentId: r.id, action: "stage_complete", detail: "screentime" } }),
+    ])
+    // Sync to Supabase
+    fireAndForget(syncScreentimeAnswers(r.code, answers))
+    fireAndForget(syncAuditLog(r.code, "stage_complete", "screentime"))
 
   // ─── MOS-SSS ──────────────────────────────────────────────────────
   } else if (stage === "mos") {
     const a = answers as Record<number, number>
     const total = scoreMos(a)
     const json = JSON.stringify(a)
-    await db.mosAnswer.upsert({
-      where: { respondentId: r.id },
-      update: { answers: json, totalScore: total },
-      create: { respondentId: r.id, answers: json, totalScore: total },
-    })
-    // Sync to Supabase
-    await syncMosAnswers(r.code, a, total)
     next.currentStage = "bullying"
     next.stageIndex = 0
-    await db.auditLog.create({ data: { respondentId: r.id, action: "stage_complete", detail: "mos" } })
-    await syncAuditLog(r.code, "stage_complete", "mos")
+    await Promise.all([
+      db.mosAnswer.upsert({
+        where: { respondentId: r.id },
+        update: { answers: json, totalScore: total },
+        create: { respondentId: r.id, answers: json, totalScore: total },
+      }),
+      db.auditLog.create({ data: { respondentId: r.id, action: "stage_complete", detail: "mos" } }),
+    ])
+    // Sync to Supabase
+    fireAndForget(syncMosAnswers(r.code, a, total))
+    fireAndForget(syncAuditLog(r.code, "stage_complete", "mos"))
 
   // ─── Bullying ─────────────────────────────────────────────────────
   } else if (stage === "bullying") {
     const a = answers as Record<number, number>
     const total = scoreBullying(a)
     const json = JSON.stringify(a)
-    await db.bullyingAnswer.upsert({
-      where: { respondentId: r.id },
-      update: { answers: json, victimScore: total },
-      create: { respondentId: r.id, answers: json, victimScore: total },
-    })
-    // Sync to Supabase
-    await syncBullyingAnswers(r.code, a, total)
     next.currentStage = "religiosity"
     next.stageIndex = 0
-    await db.auditLog.create({ data: { respondentId: r.id, action: "stage_complete", detail: "bullying" } })
-    await syncAuditLog(r.code, "stage_complete", "bullying")
+    await Promise.all([
+      db.bullyingAnswer.upsert({
+        where: { respondentId: r.id },
+        update: { answers: json, victimScore: total },
+        create: { respondentId: r.id, answers: json, victimScore: total },
+      }),
+      db.auditLog.create({ data: { respondentId: r.id, action: "stage_complete", detail: "bullying" } }),
+    ])
+    // Sync to Supabase
+    fireAndForget(syncBullyingAnswers(r.code, a, total))
+    fireAndForget(syncAuditLog(r.code, "stage_complete", "bullying"))
 
   // ─── Religiosity ──────────────────────────────────────────────────
   } else if (stage === "religiosity") {
@@ -168,13 +196,13 @@ export async function POST(req: NextRequest) {
       create: { respondentId: r.id, answers: json, totalScore: total },
     })
     // Sync to Supabase
-    await syncReligiosityAnswers(r.code, a, total)
+    fireAndForget(syncReligiosityAnswers(r.code, a, total))
     next.currentStage = "complete"
     next.stageIndex = 0
     next.status = "completed"
     next.completedAt = new Date()
     await db.auditLog.create({ data: { respondentId: r.id, action: "complete", detail: "Penelitian selesai" } })
-    await syncAuditLog(r.code, "complete", "Penelitian selesai")
+    fireAndForget(syncAuditLog(r.code, "complete", "Penelitian selesai"))
   }
 
   // Auto-save mid-stage: update stageIndex without advancing
@@ -188,7 +216,7 @@ export async function POST(req: NextRequest) {
   })
 
   // Sync respondent to Supabase after update
-  await syncRespondentToSupabase(r, next)
+  syncRespondentToSupabase(r, next)
 
   return NextResponse.json({ ok: true, ...next })
 }
@@ -200,7 +228,7 @@ export async function PATCH(req: NextRequest) {
 
   const body = await req.json()
   const { stageIndex, stage, answers } = body
-  console.log("[save/PATCH] stage:", stage, "code:", code, "stageIndex:", stageIndex, "answers keys:", Object.keys(answers ?? {}).length)
+  devLog("[save/PATCH] stage:", stage, "code:", code, "stageIndex:", stageIndex, "answers keys:", Object.keys(answers ?? {}).length)
 
   const r = await db.respondent.findUnique({ where: { code } })
   if (!r) return NextResponse.json({ error: "not_found" }, { status: 404 })
@@ -215,7 +243,7 @@ export async function PATCH(req: NextRequest) {
         create: { respondentId: r.id, data: json },
       })
       // Sync to Supabase
-      await syncDemographics(r.code, answers)
+      fireAndForget(syncDemographics(r.code, answers))
 
     } else if (stage === "cesdr") {
       const a = answers as Record<number, number>
@@ -228,7 +256,7 @@ export async function PATCH(req: NextRequest) {
         create: { respondentId: r.id, answers: json, totalScore: total, highRisk },
       })
       // Sync to Supabase
-      await syncCesdrAnswers(r.code, a, total, highRisk)
+      fireAndForget(syncCesdrAnswers(r.code, a, total, highRisk))
 
     } else if (stage === "psqi") {
       await db.psqiAnswer.upsert({
@@ -237,7 +265,7 @@ export async function PATCH(req: NextRequest) {
         create: { respondentId: r.id, answers: json },
       })
       // Sync to Supabase
-      await syncPsqiAnswers(r.code, answers, 0)
+      fireAndForget(syncPsqiAnswers(r.code, answers, 0))
 
     } else if (stage === "screentime") {
       await db.screenTimeAnswer.upsert({
@@ -246,7 +274,7 @@ export async function PATCH(req: NextRequest) {
         create: { respondentId: r.id, answers: json },
       })
       // Sync to Supabase
-      await syncScreentimeAnswers(r.code, answers)
+      fireAndForget(syncScreentimeAnswers(r.code, answers))
 
     } else if (stage === "mos") {
       const a = answers as Record<number, number>
@@ -258,7 +286,7 @@ export async function PATCH(req: NextRequest) {
         create: { respondentId: r.id, answers: json, totalScore: total },
       })
       // Sync to Supabase
-      await syncMosAnswers(r.code, a, total)
+      fireAndForget(syncMosAnswers(r.code, a, total))
 
     } else if (stage === "bullying") {
       const a = answers as Record<number, number>
@@ -270,7 +298,7 @@ export async function PATCH(req: NextRequest) {
         create: { respondentId: r.id, answers: json, victimScore: total },
       })
       // Sync to Supabase
-      await syncBullyingAnswers(r.code, a, total)
+      fireAndForget(syncBullyingAnswers(r.code, a, total))
 
     } else if (stage === "religiosity") {
       const a = answers as Record<number, number>
@@ -282,13 +310,13 @@ export async function PATCH(req: NextRequest) {
         create: { respondentId: r.id, answers: json, totalScore: total },
       })
       // Sync to Supabase
-      await syncReligiosityAnswers(r.code, a, total)
+      fireAndForget(syncReligiosityAnswers(r.code, a, total))
     }
   }
 
   await db.respondent.update({ where: { id: r.id }, data: { stageIndex } })
   // Sync respondent stage_index to Supabase
-  await syncRespondentToSupabase(r, { stageIndex })
+  syncRespondentToSupabase(r, { stageIndex })
 
   return NextResponse.json({ ok: true })
 }

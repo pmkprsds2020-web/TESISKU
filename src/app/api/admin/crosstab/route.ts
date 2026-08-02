@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
   const anyBelow1 = allExpected.some(e => e < 1)
   const lowExpectedCount = pctBelow5 > 20 || anyBelow1
   const expectedCountWarning = lowExpectedCount
-    ? `${cellsBelow5} dari ${allExpected.length} sel (${Math.round(pctBelow5)}%) memiliki expected count < 5${anyBelow1 ? ", dan setidaknya satu sel < 1" : ""}. Asumsi Chi-Square Pearson tidak terpenuhi (aturan Cochran: maks 20% sel boleh <5, tidak boleh ada sel <1)."
+    ? `${cellsBelow5} dari ${allExpected.length} sel (${Math.round(pctBelow5)}%) memiliki expected count < 5${anyBelow1 ? ", dan setidaknya satu sel < 1" : ""}. Asumsi Chi-Square Pearson tidak terpenuhi (aturan Cochran: maks 20% sel boleh <5, tidak boleh ada sel <1).`
     : null
 
   // --- 2x2-specific exact tests ---

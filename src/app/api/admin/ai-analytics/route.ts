@@ -117,6 +117,15 @@ export async function POST() {
 
   const userMessage = `Berikut adalah hasil analisis penelitian biopsikososial depresi remaja SMP:\n\n${JSON.stringify(payload, null, 2)}\n\nTolong hasilkan ringkasan naratif Bab IV.`
 
+  // PERF (audit finding): this endpoint used to call the AI SDK without
+  // `stream: true` and wait for the entire Bab IV narrative to finish
+  // generating before sending anything back — for a long narrative that
+  // can be many seconds with zero feedback on screen ("Generate AI menjadi
+  // lambat"). z-ai-web-dev-sdk supports `stream: true` and returns the raw
+  // SSE ReadableStream from the upstream API when it does. We forward that
+  // stream to the browser as plain text chunks so the narrative can start
+  // rendering well under a second, token by token, instead of all at once
+  // at the end.
   try {
     const ZAI = (await import("z-ai-web-dev-sdk")).default
     const zai = await ZAI.create()
@@ -126,11 +135,66 @@ export async function POST() {
         { role: "user", content: userMessage },
       ],
       thinking: { type: "disabled" },
+      stream: true,
     })
-    const narrative =
-      completion.choices[0]?.message?.content ??
-      "Tidak dapat menghasilkan ringkasan AI saat ini."
-    return NextResponse.json({ narrative, payload })
+
+    // Non-streaming fallback: if the SDK/provider ignored `stream: true`
+    // and returned a parsed JSON completion instead of a ReadableStream.
+    if (!(completion instanceof ReadableStream)) {
+      const narrative =
+        completion?.choices?.[0]?.message?.content ??
+        "Tidak dapat menghasilkan ringkasan AI saat ini."
+      return NextResponse.json({ narrative, payload })
+    }
+
+    const encoder = new TextEncoder()
+    const decoder = new TextDecoder()
+    const upstream = completion.getReader()
+
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        let buffer = ""
+        try {
+          while (true) {
+            const { done, value } = await upstream.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+
+            // Upstream is OpenAI-style SSE: lines of `data: {...}` separated
+            // by blank lines, terminated by `data: [DONE]`.
+            const lines = buffer.split("\n")
+            buffer = lines.pop() ?? "" // keep last (possibly partial) line
+            for (const line of lines) {
+              const trimmed = line.trim()
+              if (!trimmed.startsWith("data:")) continue
+              const payloadStr = trimmed.slice(5).trim()
+              if (payloadStr === "[DONE]") continue
+              try {
+                const json = JSON.parse(payloadStr)
+                const delta: string = json?.choices?.[0]?.delta?.content ?? ""
+                if (delta) controller.enqueue(encoder.encode(delta))
+              } catch {
+                // ignore non-JSON keep-alive lines
+              }
+            }
+          }
+        } catch (e) {
+          console.error("[ai-analytics] stream error", e)
+        } finally {
+          controller.close()
+        }
+      },
+    })
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache",
+        // Let the client also read the payload used to build the prompt,
+        // for parity with the old JSON response shape.
+        "X-Payload": encodeURIComponent(JSON.stringify(payload)),
+      },
+    })
   } catch (e) {
     console.error("[ai-analytics]", e)
     return NextResponse.json(

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
@@ -23,6 +23,18 @@ export function ScreenTimeScreen() {
   // Restore previously saved answer
   const value = q ? screentime[q.id] : undefined
 
+  // PERF (audit finding): selecting an answer scheduled a save via
+  // setTimeout(100ms), and clicking next/prev right after fired another
+  // save with the same answers — doubling requests per question. Cancel
+  // the pending draft save whenever navigation is about to send fresh data.
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelPendingDraft = useCallback(() => {
+    if (draftTimer.current) {
+      clearTimeout(draftTimer.current)
+      draftTimer.current = null
+    }
+  }, [])
+
   // Save draft (without advancing)
   const saveDraft = useCallback(() => {
     fetch('/api/save', {
@@ -34,6 +46,7 @@ export function ScreenTimeScreen() {
 
   // Navigate next (only via button)
   const goNext = useCallback(() => {
+    cancelPendingDraft()
     if (idx + 1 < TOTAL) {
       setIdx(idx + 1)
       fetch('/api/save', {
@@ -52,10 +65,11 @@ export function ScreenTimeScreen() {
         setShowComplete(true)
       })
     }
-  }, [idx, screentime, TOTAL])
+  }, [idx, screentime, TOTAL, cancelPendingDraft])
 
   // Navigate prev (preserves answers)
   const goPrev = useCallback(() => {
+    cancelPendingDraft()
     if (idx > 0) {
       setIdx(idx - 1)
       fetch('/api/save', {
@@ -64,7 +78,7 @@ export function ScreenTimeScreen() {
         body: JSON.stringify({ stageIndex: idx - 1, stage: 'screentime', answers: screentime }),
       })
     }
-  }, [idx, screentime])
+  }, [idx, screentime, cancelPendingDraft])
 
   if (!q) {
     return null
@@ -75,8 +89,10 @@ export function ScreenTimeScreen() {
   // Handle selection — save draft, stay on same page (NO auto-advance)
   function handleSelect(v: number) {
     patchScreenTime(q.id, v)
-    // Save draft immediately
-    setTimeout(() => saveDraft(), 100)
+    // Save draft shortly after selecting, unless navigation cancels this
+    // first and sends fresh data itself.
+    cancelPendingDraft()
+    draftTimer.current = setTimeout(() => saveDraft(), 100)
   }
 
   return (

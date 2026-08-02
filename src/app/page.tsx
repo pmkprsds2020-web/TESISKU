@@ -1,13 +1,45 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { useAppStore } from '@/lib/store'
 import { WelcomeScreen } from '@/components/teenmind/screens/welcome'
 import { LoadingScreen } from '@/components/teenmind/screens/loading'
 import { LoginScreen } from '@/components/teenmind/screens/login'
-import { RespondentApp } from '@/components/teenmind/screens/respondent-app'
-import { AdminLoginScreen } from '@/components/teenmind/screens/admin-login'
-import { AdminDashboard } from '@/components/teenmind/screens/admin-dashboard'
+
+// PERF (audit finding): this file used to statically import RespondentApp
+// AND AdminLoginScreen AND AdminDashboard. AdminDashboard alone pulls in
+// recharts, framer-motion, react-markdown, and (via CohortPanel) all 9
+// statistics panels — regression/factor/cluster/logistic/mediation/
+// moderation/partial-corr/crosstab/reliability. Because everything was
+// imported eagerly at the top of this client component, EVERY visitor —
+// including a student who only ever fills out the survey — downloaded and
+// parsed the entire admin analytics bundle before seeing the welcome
+// screen. That is the single biggest contributor to "Loading awal sangat
+// lama". Splitting these into their own chunks means each one only loads
+// when its mode is actually reached.
+const RespondentApp = dynamic(
+  () => import('@/components/teenmind/screens/respondent-app').then((m) => m.RespondentApp),
+  { loading: () => <ScreenFallback /> }
+)
+const AdminLoginScreen = dynamic(
+  () => import('@/components/teenmind/screens/admin-login').then((m) => m.AdminLoginScreen),
+  { loading: () => <ScreenFallback /> }
+)
+const AdminDashboard = dynamic(
+  () => import('@/components/teenmind/screens/admin-dashboard').then((m) => m.AdminDashboard),
+  { loading: () => <ScreenFallback /> }
+)
+
+function ScreenFallback() {
+  return (
+    <div className="flex min-h-[100dvh] items-center justify-center bg-mesh">
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-300 to-teal-300 text-3xl shadow-lg animate-pulse">
+        🧠
+      </div>
+    </div>
+  )
+}
 
 export default function Home() {
   const mode = useAppStore((s) => s.mode)

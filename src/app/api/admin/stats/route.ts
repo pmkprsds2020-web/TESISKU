@@ -7,25 +7,58 @@ export async function GET() {
   const admin = await getAdminCookie()
   if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
-  const totalCodes = await db.researchCode.count()
-  const totalRespondents = await db.respondent.count()
-  const completed = await db.respondent.count({ where: { status: "completed" } })
-  const inProgress = await db.respondent.count({ where: { status: "in_progress" } })
-  const highRisk = await db.respondent.count({ where: { highRisk: true } })
+  // PERF: these were 6 sequential round-trips to the database (each one
+  // waiting for the previous to finish). Running them concurrently with
+  // Promise.all cuts this part of the response time to roughly the cost
+  // of the single slowest query instead of the sum of all of them.
+  const since = new Date(Date.now() - 14 * 24 * 3600_000)
+  const [
+    totalCodes,
+    totalRespondents,
+    completed,
+    inProgress,
+    highRisk,
+    setting,
+    respondents,
+    allWithScores,
+  ] = await Promise.all([
+    db.researchCode.count(),
+    db.respondent.count(),
+    db.respondent.count({ where: { status: "completed" } }),
+    db.respondent.count({ where: { status: "in_progress" } }),
+    db.respondent.count({ where: { highRisk: true } }),
+    db.setting.findUnique({ where: { key: "targetRespondents" } }),
+    // Per day (last 14 days)
+    db.respondent.findMany({
+      where: { startedAt: { gte: since } },
+      select: { startedAt: true, status: true, school: true, highRisk: true },
+    }),
+    // Demographics + scores for completed respondents.
+    // NOTE: this replaces what used to be TWO nearly-identical queries here
+    // (`completedRespondents` fetching demographic+cesdr, immediately
+    // followed by `allWithScores` fetching demographic+cesdr+psqi+mos+
+    // bullying+religiosity). The first result was never actually used —
+    // it was a dead, redundant full-table query with joins run on every
+    // dashboard load. Removed; this single query now covers everything.
+    db.respondent.findMany({
+      where: { status: "completed" },
+      include: {
+        demographic: true,
+        cesdr: true,
+        psqi: true,
+        mos: true,
+        bullying: true,
+        religiosity: true,
+      },
+    }),
+  ])
 
   // Target from settings (default 100)
   let targetRespondents = 100
-  const setting = await db.setting.findUnique({ where: { key: "targetRespondents" } })
   if (setting) {
     try { targetRespondents = JSON.parse(setting.value) as number } catch { /* keep default */ }
   }
 
-  // Per day (last 14 days)
-  const since = new Date(Date.now() - 14 * 24 * 3600_000)
-  const respondents = await db.respondent.findMany({
-    where: { startedAt: { gte: since } },
-    select: { startedAt: true, status: true, school: true, highRisk: true },
-  })
   const perDay: Record<string, { total: number; completed: number }> = {}
   for (let i = 13; i >= 0; i--) {
     const d = new Date(Date.now() - i * 24 * 3600_000)
@@ -40,12 +73,6 @@ export async function GET() {
     }
   }
 
-  // Demographics distribution (from completed respondents)
-  const completedRespondents = await db.respondent.findMany({
-    where: { status: "completed" },
-    include: { demographic: true, cesdr: true },
-  })
-
   const bySchool: Record<string, number> = {}
   const byGender: Record<string, number> = {}
   const byAge: Record<string, number> = {}
@@ -56,18 +83,6 @@ export async function GET() {
   const mosScores: number[] = []
   const bullyingScores: number[] = []
   const religiosityScores: number[] = []
-
-  const allWithScores = await db.respondent.findMany({
-    where: { status: "completed" },
-    include: {
-      demographic: true,
-      cesdr: true,
-      psqi: true,
-      mos: true,
-      bullying: true,
-      religiosity: true,
-    },
-  })
 
   for (const r of allWithScores) {
     if (r.demographic) {
@@ -134,6 +149,21 @@ export async function GET() {
   const bullyingArr: (number | null)[] = allWithScores.map((r) => r.bullying?.victimScore ?? null)
   const religArr: (number | null)[] = allWithScores.map((r) => r.religiosity?.totalScore ?? null)
 
+  // PERF: each pair (e.g. cesdr×psqi) was being recomputed twice — once for
+  // the flat `correlations.*` fields and again for the `matrix` — and the
+  // matrix itself computed each off-diagonal pair twice more (once per
+  // triangle). Compute every unique pair exactly once and reuse it.
+  const cesdr_psqi = corr(cesdrArr, psqiArr)
+  const cesdr_mos = corr(cesdrArr, mosArr)
+  const cesdr_bullying = corr(cesdrArr, bullyingArr)
+  const cesdr_religiosity = corr(cesdrArr, religArr)
+  const psqi_mos = corr(psqiArr, mosArr)
+  const psqi_bullying = corr(psqiArr, bullyingArr)
+  const psqi_religiosity = corr(psqiArr, religArr)
+  const mos_bullying = corr(mosArr, bullyingArr)
+  const mos_religiosity = corr(mosArr, religArr)
+  const bullying_religiosity = corr(bullyingArr, religArr)
+
   return NextResponse.json({
     overview: {
       totalCodes,
@@ -160,18 +190,18 @@ export async function GET() {
       religiosity: stats(religiosityScores),
     },
     correlations: {
-      cesdr_psqi: corr(cesdrArr, psqiArr),
-      cesdr_mos: corr(cesdrArr, mosArr),
-      cesdr_bullying: corr(cesdrArr, bullyingArr),
-      cesdr_religiosity: corr(cesdrArr, religArr),
+      cesdr_psqi,
+      cesdr_mos,
+      cesdr_bullying,
+      cesdr_religiosity,
       cesdr_screentime: 0,
       // Full matrix
       matrix: {
-        cesdr: { cesdr: 1, psqi: corr(cesdrArr, psqiArr), mos: corr(cesdrArr, mosArr), bullying: corr(cesdrArr, bullyingArr), religiosity: corr(cesdrArr, religArr) },
-        psqi: { cesdr: corr(cesdrArr, psqiArr), psqi: 1, mos: corr(psqiArr, mosArr), bullying: corr(psqiArr, bullyingArr), religiosity: corr(psqiArr, religArr) },
-        mos: { cesdr: corr(cesdrArr, mosArr), psqi: corr(psqiArr, mosArr), mos: 1, bullying: corr(mosArr, bullyingArr), religiosity: corr(mosArr, religArr) },
-        bullying: { cesdr: corr(cesdrArr, bullyingArr), psqi: corr(psqiArr, bullyingArr), mos: corr(mosArr, bullyingArr), bullying: 1, religiosity: corr(bullyingArr, religArr) },
-        religiosity: { cesdr: corr(cesdrArr, religArr), psqi: corr(psqiArr, religArr), mos: corr(mosArr, religArr), bullying: corr(bullyingArr, religArr), religiosity: 1 },
+        cesdr: { cesdr: 1, psqi: cesdr_psqi, mos: cesdr_mos, bullying: cesdr_bullying, religiosity: cesdr_religiosity },
+        psqi: { cesdr: cesdr_psqi, psqi: 1, mos: psqi_mos, bullying: psqi_bullying, religiosity: psqi_religiosity },
+        mos: { cesdr: cesdr_mos, psqi: psqi_mos, mos: 1, bullying: mos_bullying, religiosity: mos_religiosity },
+        bullying: { cesdr: cesdr_bullying, psqi: psqi_bullying, mos: mos_bullying, bullying: 1, religiosity: bullying_religiosity },
+        religiosity: { cesdr: cesdr_religiosity, psqi: psqi_religiosity, mos: mos_religiosity, bullying: bullying_religiosity, religiosity: 1 },
       },
     },
     n: allWithScores.length,
