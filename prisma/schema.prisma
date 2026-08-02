@@ -2,13 +2,15 @@
 // Thesis research platform for adolescent biopsychosocial depression study
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
 }
 
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")   // pooled connection (pgbouncer) — used at runtime by API routes
   directUrl = env("DIRECT_URL")     // direct connection — used only by `prisma migrate`/`db push`
+  schemas   = ["prisma_app"]
 }
 
 /// Responden (siswa SMP) yang mengikuti penelitian
@@ -38,6 +40,7 @@ model Respondent {
 
   @@index([status])
   @@index([highRisk])
+  @@schema("prisma_app")
 }
 
 /// Kode penelitian yang dibuat admin
@@ -47,6 +50,8 @@ model ResearchCode {
   classGrade  String?
   used        Boolean   @default(false)
   createdAt   DateTime  @default(now())
+
+  @@schema("prisma_app")
 }
 
 /// Admin penelitian
@@ -56,6 +61,8 @@ model AdminUser {
   password  String // hashed
   name      String?
   createdAt DateTime @default(now())
+
+  @@schema("prisma_app")
 }
 
 /// Data demografi responden (JSON blob untuk fleksibilitas)
@@ -66,6 +73,8 @@ model Demographic {
   data         String // JSON: { initial, age, gender, school, class, ... }
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@schema("prisma_app")
 }
 
 /// Jawaban CESD-R (20 item)
@@ -78,6 +87,8 @@ model CesdrAnswer {
   highRisk     Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@schema("prisma_app")
 }
 
 /// Jawaban PSQI
@@ -89,6 +100,8 @@ model PsqiAnswer {
   totalScore   Int      @default(0) // PSQI global 0-21
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@schema("prisma_app")
 }
 
 /// Jawaban Screen Time & Media Sosial
@@ -99,6 +112,8 @@ model ScreenTimeAnswer {
   answers      String // JSON
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@schema("prisma_app")
 }
 
 /// Jawaban MOS-SSS (social support)
@@ -110,6 +125,8 @@ model MosAnswer {
   totalScore   Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@schema("prisma_app")
 }
 
 /// Jawaban Gatehouse Bullying Scale
@@ -121,6 +138,8 @@ model BullyingAnswer {
   victimScore  Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@schema("prisma_app")
 }
 
 /// Jawaban Praktik Ibadah / Religiusitas
@@ -132,6 +151,8 @@ model ReligiosityAnswer {
   totalScore   Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@schema("prisma_app")
 }
 
 /// Audit trail
@@ -144,6 +165,8 @@ model AuditLog {
   createdAt    DateTime @default(now())
 
   @@index([action])
+
+  @@schema("prisma_app")
 }
 
 /// Key-value settings store (target respondents, schools, contact info, etc.)
@@ -151,5 +174,7 @@ model Setting {
   key       String   @id
   value     String // JSON-encoded value
   updatedAt DateTime @updatedAt
+
+  @@schema("prisma_app")
 }
 
