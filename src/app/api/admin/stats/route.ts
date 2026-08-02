@@ -90,7 +90,11 @@ export async function GET() {
     const mean = arr.reduce((a, b) => a + b, 0) / n
     const sorted = [...arr].sort((a, b) => a - b)
     const median = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
-    const variance = arr.reduce((a, b) => a + (b - mean) ** 2, 0) / n
+    // Sample variance (n-1, Bessel's correction) — matches SPSS default and every
+    // other module in this app (cohort, reliability, factor, moderation, cluster).
+    // Previously used population variance (÷n), which made SD here silently
+    // smaller than the SD for the exact same data shown elsewhere in the dashboard.
+    const variance = n > 1 ? arr.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1) : 0
     const sd = Math.sqrt(variance)
     return { n, mean: Math.round(mean * 100) / 100, median, sd: Math.round(sd * 100) / 100, min: sorted[0], max: sorted[n - 1] }
   }
