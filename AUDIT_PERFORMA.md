@@ -220,3 +220,53 @@ setelah deploy.
    `@tanstack/react-table`, `react-syntax-highlighter`) — tidak berdampak
    ke bundle runtime (tidak pernah di-import), tapi memperlambat install
    dan menambah ukuran `node_modules`.
+
+---
+
+## Addendum — Perbaikan Setelah Deploy Pertama (tesisku.vercel.app)
+
+Setelah deploy, ditemukan di console browser:
+- `GET /api/progress 401` — **ini normal**, bukan bug. Artinya belum ada
+  sesi responden aktif di browser tersebut (belum isi kode penelitian).
+  Sudah ditangani lewat `catch{}` di `page.tsx`, tidak mengganggu apapun.
+- `GET /api/admin/stats 500` + `Uncaught SyntaxError: Unexpected end of
+  JSON input` — **ini bug nyata**, ditemukan & diperbaiki dua lapis:
+
+  1. **Server (`admin/stats/route.ts`)**: sebelumnya bila ada error
+     runtime (mis. koneksi DB gagal, env var belum diset, skema belum
+     dimigrasikan), Next.js mengembalikan 500 dengan body kosong/HTML —
+     bukan JSON. Sekarang seluruh handler dibungkus `try/catch`; error asli
+     dicatat ke `console.error` (akan tampil di **Vercel → project Anda →
+     tab Logs / Runtime Logs**) dan client menerima JSON error yang jelas.
+
+  2. **Client (`admin-dashboard.tsx`)**: `loadData()` sebelumnya memanggil
+     `.json()` langsung tanpa cek `res.ok`, dan tidak ada `catch` sama
+     sekali — jadi begitu parsing gagal, `stats` tidak pernah ter-set dan
+     dashboard **tersangkut selamanya di skeleton loading** tanpa pesan
+     error apapun (persis seperti di screenshot). Sekarang ada state error
+     khusus dengan tombol "Coba lagi", dan response di-parse secara aman.
+
+### Untuk menemukan akar masalah 500 yang sebenarnya
+
+Kode di atas membuat errornya *terlihat*, tapi penyebab aslinya spesifik
+ke environment deploy Anda. Langkah cek:
+
+1. **Vercel Dashboard → project → tab "Logs"** (atau "Runtime Logs") saat
+   me-refresh halaman admin — akan ada baris `[admin/stats] failed: ...`
+   dengan pesan error Prisma/Postgres yang sebenarnya.
+2. Pastikan environment variables berikut sudah diset di
+   **Vercel → Settings → Environment Variables** (lihat `.env.example`):
+   `DATABASE_URL`, `DIRECT_URL`, `NEXT_PUBLIC_SUPABASE_URL`,
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+3. Pastikan skema Prisma sudah dijalankan ke database production:
+   `npx prisma db push` (atau `prisma migrate deploy` bila pakai migration
+   files) — kalau tabel belum ada di DB yang ditunjuk `DATABASE_URL`,
+   semua query akan gagal dengan error "relation does not exist".
+4. Kalau `DATABASE_URL` memakai pooler (pgbouncer) dari Supabase, pastikan
+   formatnya benar (biasanya port `6543` + `?pgbouncer=true`), dan
+   `DIRECT_URL` memakai port langsung (`5432`) — Prisma butuh keduanya
+   sesuai `schema.prisma`.
+
+Setelah dicoba ulang, kalau masih 500, salin pesan error dari Vercel Logs
+(langkah 1) — dengan itu akar masalahnya bisa dipastikan persis, alih-alih
+menebak.

@@ -110,15 +110,45 @@ export function AdminDashboard() {
   const [selectedForCompare, setSelectedForCompare] = useState<Set<string>>(new Set())
   const [compareOpen, setCompareOpen] = useState(false)
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const loadData = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
-      const [s, r] = await Promise.all([
-        fetch('/api/admin/stats').then((x) => x.json()),
-        fetch('/api/admin/respondents').then((x) => x.json()),
+      // BUG FIX: this used to call `.then(x => x.json())` directly. If the
+      // server returned a non-2xx response with an empty/HTML body (e.g. an
+      // unhandled server error), `.json()` throws "Unexpected end of JSON
+      // input" — and since nothing here caught it, `stats` never got set
+      // and the dashboard was stuck on the loading skeleton forever with no
+      // visible error. Now we check `res.ok` and parse defensively, and any
+      // failure surfaces as a real, retryable error message.
+      const parseJsonSafe = async (res: Response) => {
+        const text = await res.text()
+        try {
+          return text ? JSON.parse(text) : {}
+        } catch {
+          return { error: `invalid_response_${res.status}` }
+        }
+      }
+      const [statsRes, respRes] = await Promise.all([
+        fetch('/api/admin/stats'),
+        fetch('/api/admin/respondents'),
       ])
-      if (!s.error) setStats(s)
-      if (!r.error) setRespondents(r.respondents)
+      const [s, r] = await Promise.all([parseJsonSafe(statsRes), parseJsonSafe(respRes)])
+
+      if (!statsRes.ok || s.error) {
+        throw new Error(s.message || s.error || `Gagal memuat statistik (${statsRes.status})`)
+      }
+      setStats(s)
+
+      if (!respRes.ok || r.error) {
+        throw new Error(r.message || r.error || `Gagal memuat data responden (${respRes.status})`)
+      }
+      setRespondents(r.respondents)
+    } catch (e) {
+      console.error('[AdminDashboard] loadData failed:', e)
+      setLoadError(e instanceof Error ? e.message : 'Gagal memuat data dashboard.')
     } finally {
       setLoading(false)
     }
@@ -183,6 +213,19 @@ export function AdminDashboard() {
     } finally {
       setAiLoading(false)
     }
+  }
+
+  if (loadError && !stats) {
+    return (
+      <div className="flex min-h-[100dvh] items-center justify-center bg-mesh px-4">
+        <div className="max-w-md rounded-2xl bg-white/80 p-6 text-center shadow-lg ring-1 ring-black/5 dark:bg-slate-900/80">
+          <AlertTriangle className="mx-auto h-10 w-10 text-rose-500" />
+          <p className="mt-3 font-semibold text-foreground">Gagal memuat dashboard</p>
+          <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
+          <Button className="mt-4" onClick={() => loadData()}>Coba lagi</Button>
+        </div>
+      </div>
+    )
   }
 
   if (loading || !stats) {

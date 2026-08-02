@@ -7,6 +7,24 @@ export async function GET() {
   const admin = await getAdminCookie()
   if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
+  try {
+    return await buildStats()
+  } catch (e) {
+    // Previously an unhandled throw here (e.g. DB connection failure,
+    // missing env var, unmigrated schema) made Next.js return a 500 with
+    // an empty/HTML body — which the client then failed to JSON.parse
+    // ("Unexpected end of JSON input"), masking the real cause. Now the
+    // actual error is logged server-side (visible in Vercel function
+    // logs) and the client gets a proper JSON error to show/handle.
+    console.error("[admin/stats] failed:", e)
+    return NextResponse.json(
+      { error: "stats_failed", message: e instanceof Error ? e.message : String(e) },
+      { status: 500 }
+    )
+  }
+}
+
+async function buildStats() {
   // PERF: these were 6 sequential round-trips to the database (each one
   // waiting for the previous to finish). Running them concurrently with
   // Promise.all cuts this part of the response time to roughly the cost
