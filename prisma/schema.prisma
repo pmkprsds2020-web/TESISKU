@@ -6,8 +6,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")   // pooled connection (pgbouncer) — used at runtime by API routes
+  directUrl = env("DIRECT_URL")     // direct connection — used only by `prisma migrate`/`db push`
 }
 
 /// Responden (siswa SMP) yang mengikuti penelitian
