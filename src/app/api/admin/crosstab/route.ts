@@ -73,6 +73,52 @@ export async function POST(req: NextRequest) {
   const cramersV = N > 0 ? Math.sqrt(chiSquare / (N * Math.min(rows.length - 1, cols.length - 1))) : 0
   const vInterpretation = cramersV < 0.1 ? "Sangat lemah" : cramersV < 0.3 ? "Lemah" : cramersV < 0.5 ? "Sedang" : "Kuat"
 
+  // --- Expected-count adequacy check (Cochran's rule) ---
+  // SPSS-style rule: flag if any expected cell < 5, and separately whether >20% of
+  // cells are < 5 (the threshold at which Pearson chi-square is considered unreliable).
+  const allExpected = expected.flat()
+  const cellsBelow5 = allExpected.filter(e => e < 5).length
+  const pctBelow5 = allExpected.length > 0 ? (cellsBelow5 / allExpected.length) * 100 : 0
+  const anyBelow1 = allExpected.some(e => e < 1)
+  const lowExpectedCount = pctBelow5 > 20 || anyBelow1
+  const expectedCountWarning = lowExpectedCount
+    ? `${cellsBelow5} dari ${allExpected.length} sel (${Math.round(pctBelow5)}%) memiliki expected count < 5${anyBelow1 ? ", dan setidaknya satu sel < 1" : ""}. Asumsi Chi-Square Pearson tidak terpenuhi (aturan Cochran: maks 20% sel boleh <5, tidak boleh ada sel <1)."
+    : null
+
+  // --- 2x2-specific exact tests ---
+  // Continuity Correction (Yates) and Fisher's Exact Test only apply to 2x2 tables.
+  let continuityCorrection: { statistic: number; pValue: number; description: string } | null = null
+  let fisherExact: { pValue: number; description: string } | null = null
+  let recommendedTest: string = "Pearson Chi-Square"
+
+  if (rows.length === 2 && cols.length === 2) {
+    const [[a, b], [c, d]] = matrix
+
+    // Yates' continuity correction
+    let chiYates = 0
+    for (let i = 0; i < 2; i++) {
+      for (let j = 0; j < 2; j++) {
+        const exp = expected[i][j]
+        if (exp > 0) chiYates += Math.pow(Math.abs(matrix[i][j] - exp) - 0.5, 2) / exp
+      }
+    }
+    const pYates = chiSquarePValue(chiYates, 1)
+    continuityCorrection = {
+      statistic: Math.round(chiYates * 1000) / 1000,
+      pValue: Math.round(pYates * 10000) / 10000,
+      description: `χ²(1, dengan koreksi Yates) = ${Math.round(chiYates * 1000) / 1000}, p = ${pYates < 0.001 ? "<0.001" : Math.round(pYates * 10000) / 10000}.`,
+    }
+
+    // Fisher's Exact Test (exact hypergeometric, two-sided)
+    const pFisher = fisherExact2x2(a, b, c, d)
+    fisherExact = {
+      pValue: Math.round(pFisher * 10000) / 10000,
+      description: `Fisher's Exact Test (dua-arah): p = ${pFisher < 0.001 ? "<0.001" : Math.round(pFisher * 10000) / 10000}.`,
+    }
+
+    if (lowExpectedCount) recommendedTest = "Fisher's Exact Test"
+  }
+
   return NextResponse.json({
     var1,
     var2,
@@ -90,6 +136,16 @@ export async function POST(req: NextRequest) {
       significant: pValue < 0.05,
       description: `χ²(${df}) = ${Math.round(chiSquare * 1000) / 1000}, p = ${pValue < 0.001 ? "<0.001" : Math.round(pValue * 10000) / 10000}. ${pValue < 0.05 ? "Hubungan signifikan" : "Tidak ada hubungan signifikan"} pada α=0.05.`,
       effectSize: { name: "Cramér's V", value: Math.round(cramersV * 1000) / 1000, interpretation: vInterpretation },
+    },
+    continuityCorrection,
+    fisherExact,
+    expectedCountCheck: {
+      cellsBelow5,
+      totalCells: allExpected.length,
+      pctBelow5: Math.round(pctBelow5 * 10) / 10,
+      lowExpectedCount,
+      warning: expectedCountWarning,
+      recommendedTest,
     },
   })
 }
@@ -157,4 +213,42 @@ function logGamma(x: number): number {
     a += c[i] / (x + i)
   }
   return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a)
+}
+
+// log(nCk), via log-gamma (avoids overflow for larger sample sizes)
+function logChoose(n: number, k: number): number {
+  if (k < 0 || k > n) return -Infinity
+  return logGamma(n + 1) - logGamma(k + 1) - logGamma(n - k + 1)
+}
+
+// Exact hypergeometric probability of a 2x2 table with cell (row1,col1) = k,
+// given fixed row/column margins.
+function hypergeomLogProb(k: number, row1Total: number, row2Total: number, col1Total: number, N: number): number {
+  return logChoose(row1Total, k) + logChoose(row2Total, col1Total - k) - logChoose(N, col1Total)
+}
+
+// Fisher's Exact Test for a 2x2 table [[a,b],[c,d]], two-sided p-value:
+// sum of probabilities of every table (with the same margins) that is no more
+// likely than the observed table (the standard two-sided definition used by
+// R's fisher.test and SPSS).
+function fisherExact2x2(a: number, b: number, c: number, d: number): number {
+  const row1 = a + b
+  const row2 = c + d
+  const col1 = a + c
+  const N = row1 + row2
+  const kMin = Math.max(0, col1 - row2)
+  const kMax = Math.min(row1, col1)
+
+  const logPObserved = hypergeomLogProb(a, row1, row2, col1, N)
+  const pObserved = Math.exp(logPObserved)
+  const tolerance = 1e-7 // guards against floating-point rounding excluding the observed table itself
+
+  let pValue = 0
+  for (let k = kMin; k <= kMax; k++) {
+    const pk = Math.exp(hypergeomLogProb(k, row1, row2, col1, N))
+    if (pk <= pObserved * (1 + tolerance)) {
+      pValue += pk
+    }
+  }
+  return Math.min(1, pValue)
 }

@@ -24,6 +24,16 @@ type CrosstabData = {
     description: string
     effectSize: { name: string; value: number; interpretation: string }
   }
+  continuityCorrection: { statistic: number; pValue: number; description: string } | null
+  fisherExact: { pValue: number; description: string } | null
+  expectedCountCheck: {
+    cellsBelow5: number
+    totalCells: number
+    pctBelow5: number
+    lowExpectedCount: boolean
+    warning: string | null
+    recommendedTest: string
+  }
 }
 
 const VAR_OPTIONS = [
@@ -174,7 +184,44 @@ export function CrosstabPanel() {
               </div>
             </motion.div>
 
-            {/* Contingency table */}
+            {/* Expected count warning + exact tests (2x2) */}
+            {data.expectedCountCheck.lowExpectedCount && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-200 dark:bg-amber-950/20 dark:ring-amber-900"
+              >
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
+                  <div className="flex-1">
+                    <h5 className="text-sm font-bold text-foreground">Expected Count Rendah</h5>
+                    <p className="mt-1 text-xs text-foreground/80">{data.expectedCountCheck.warning}</p>
+                    <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+                      Gunakan: {data.expectedCountCheck.recommendedTest}
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {data.fisherExact && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-2xl bg-indigo-50 p-4 ring-1 ring-indigo-200 dark:bg-indigo-950/20 dark:ring-indigo-900"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <h5 className="text-sm font-bold text-foreground">Fisher&apos;s Exact Test</h5>
+                  <Badge variant={data.fisherExact.pValue < 0.05 ? 'destructive' : 'default'} className="text-[10px]">
+                    p = {data.fisherExact.pValue < 0.001 ? '<0.001' : data.fisherExact.pValue}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs text-foreground/80">
+                  Tabel 2×2 — hasil eksak (hipergeometrik), tidak bergantung pada asumsi ukuran sampel besar seperti Chi-Square.
+                  {data.continuityCorrection && ` Dengan koreksi kontinuitas Yates: χ² = ${data.continuityCorrection.statistic}, p = ${data.continuityCorrection.pValue < 0.001 ? '<0.001' : data.continuityCorrection.pValue}.`}
+                </p>
+              </motion.div>
+            )}
             <div className="overflow-x-auto scrollbar-thin">
               <table className="w-full text-sm">
                 <thead>
