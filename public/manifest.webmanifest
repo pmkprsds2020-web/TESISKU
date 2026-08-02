@@ -1,0 +1,18 @@
+{
+  "name": "TeenMind Research",
+  "short_name": "TeenMind",
+  "description": "Kenali Dirimu, Bantu Penelitian, Jaga Kesehatan Mental",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#7dd3c0",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
