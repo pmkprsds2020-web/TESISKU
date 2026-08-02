@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { db } from "@/lib/db"
+import { db, withDbRetry } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
 
 // GET /api/admin/stats
@@ -8,7 +8,9 @@ export async function GET() {
   if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   try {
-    return await buildStats()
+    // buildStats() is entirely read-only, so retrying the whole thing once
+    // on a transient connection-pool error (see src/lib/db.ts) is safe.
+    return await withDbRetry(buildStats)
   } catch (e) {
     // Previously an unhandled throw here (e.g. DB connection failure,
     // missing env var, unmigrated schema) made Next.js return a 500 with
@@ -25,10 +27,16 @@ export async function GET() {
 }
 
 async function buildStats() {
-  // PERF: these were 6 sequential round-trips to the database (each one
-  // waiting for the previous to finish). Running them concurrently with
-  // Promise.all cuts this part of the response time to roughly the cost
-  // of the single slowest query instead of the sum of all of them.
+  // PERF + CONNECTION-POOL FIX: with DATABASE_URL now correctly set to
+  // connection_limit=1 (required for the Supabase transaction pooler under
+  // Vercel's serverless concurrency — see src/lib/db.ts), firing 8 queries
+  // at once via Promise.all made 7 of them queue for the single available
+  // connection and time out (P2024) once the queue exceeded pool_timeout.
+  // `db.$transaction([...])` (batch form) sends all of these over ONE
+  // connection efficiently instead of each needing its own — which is
+  // exactly what connection_limit=1 requires. As a bonus this also makes
+  // the whole read a single consistent snapshot instead of 8 independent
+  // reads that could race against writes happening in between.
   const since = new Date(Date.now() - 14 * 24 * 3600_000)
   const [
     totalCodes,
@@ -39,7 +47,7 @@ async function buildStats() {
     setting,
     respondents,
     allWithScores,
-  ] = await Promise.all([
+  ] = await db.$transaction([
     db.researchCode.count(),
     db.respondent.count(),
     db.respondent.count({ where: { status: "completed" } }),

@@ -270,3 +270,86 @@ ke environment deploy Anda. Langkah cek:
 Setelah dicoba ulang, kalau masih 500, salin pesan error dari Vercel Logs
 (langkah 1) — dengan itu akar masalahnya bisa dipastikan persis, alih-alih
 menebak.
+
+---
+
+## Addendum 2 — Root Cause 500 Ditemukan: Connection Pool Exhaustion
+
+Dari Vercel Logs yang dibagikan, error sebenarnya adalah:
+
+```
+Error [PrismaClientUnknownRequestError]: Invalid `prisma.respondent.findUnique()` invocation:
+Error in connector: Error querying the database: FATAL: (EMAXCONNSESSION) max clie...
+```
+
+**Ini bukan bug logika di kode** — ini database connection pooler
+(Supabase Supavisor) kehabisan slot koneksi. Di Vercel, tiap API route
+bisa jadi serverless function terpisah, dan tiap invocation yang
+di-auto-scale (mis. banyak siswa submit bersamaan) bisa membuka koneksi
+Postgres-nya sendiri. Kalau `DATABASE_URL` mengarah ke pooler mode
+**session** (bukan **transaction**), jumlah slot sesi yang tersedia cepat
+habis di bawah beban bersamaan.
+
+**Perbaikan kode yang diterapkan:**
+1. `src/lib/db.ts` — ditambahkan `withDbRetry()`: retry sekali dengan
+   backoff, khusus untuk error yang polanya connection-pool-exhaustion
+   (`EMAXCONNSESSION`, `P1001`, `P1017`, `P2024`, dll) — bukan error query
+   biasa, yang tetap langsung gagal seperti sebelumnya.
+2. Diterapkan di titik yang paling sering gagal di log: `db.respondent.
+   findUnique()` di awal `/api/save` (read-only, aman diulang) dan seluruh
+   `/api/admin/stats` (juga read-only).
+3. Upsert/write (mis. `auditLog.create`) **sengaja tidak** ikut di-retry
+   otomatis untuk menghindari risiko duplikasi data bila retry terjadi
+   setelah write sebenarnya sempat berhasil.
+
+**Perbaikan konfigurasi yang WAJIB dilakukan di sisi Anda** (kode saja
+tidak cukup untuk root cause ini):
+- Pastikan `DATABASE_URL` memakai **Transaction pooler** Supabase (port
+  `6543`), bukan session/direct (port `5432`), dengan
+  `?pgbouncer=true&connection_limit=1&pool_timeout=10`.
+- Ambil connection string yang benar dari: **Supabase Dashboard → Project
+  → Connect → "Transaction pooler"**.
+- `DIRECT_URL` tetap pakai port `5432` (hanya dipakai untuk
+  `prisma migrate`/`db push`, bukan runtime).
+- Detail & contoh lengkap ada di `.env.example` yang sudah diperbarui.
+
+Retry di kode akan membantu request yang gagal karena lonjakan sesaat,
+tapi kalau `DATABASE_URL` masih memakai pooler mode yang salah, di bawah
+beban tinggi errornya akan tetap muncul (hanya lebih jarang). Perbaikan
+konfigurasi di atas adalah fix yang sebenarnya.
+
+---
+
+## Addendum 3 — P2024 (Connection Pool Timeout) Setelah Fix connection_limit
+
+Setelah `DATABASE_URL` diperbaiki dengan `connection_limit=1`, error
+`EMAXCONNSESSION` hilang — tapi muncul error baru:
+
+```
+Error [PrismaClientKnownRequestError]: Invalid `prisma.researchCode.count()` invocation:
+Timed out fetching a new connection from the connection pool.
+(Current connection pool timeout: 10, connection limit: 1)   [code: P2024]
+```
+
+**Ini disebabkan langsung oleh optimasi `Promise.all` yang diterapkan di
+audit awal**, yang sekarang bentrok dengan `connection_limit=1`:
+`/api/admin/stats` menjalankan 8 query Prisma sekaligus lewat
+`Promise.all`, tapi dengan `connection_limit=1` hanya ada 1 slot koneksi
+— 7 query lain harus antre, dan kalau antreannya melebihi `pool_timeout`,
+gagal dengan P2024. Pola yang sama juga ada di beberapa cabang
+`/api/save` (pasangan upsert + auditLog.create via `Promise.all`).
+
+**Perbaikan:** kedua route sekarang memakai `db.$transaction([...])`
+(bentuk batch) alih-alih `Promise.all([...])`. `$transaction` batch
+mengirim beberapa query lewat **satu** koneksi secara efisien — sesuai
+dengan batasan `connection_limit=1` — sekaligus membuat operasinya atomik
+(khusus untuk pasangan upsert+audit-log di `/api/save`, ini juga
+memperbaiki celah kecil: sebelumnya kalau salah satu dari 2 write gagal
+di tengah jalan, yang lain bisa saja sudah ter-commit; sekarang
+keduanya sukses bersama atau gagal bersama).
+
+**Pelajaran untuk ke depan:** dengan `connection_limit=1` (wajib untuk
+serverless + Supabase transaction pooler), jangan pakai `Promise.all`
+untuk beberapa query Prisma sekaligus dalam satu request — pakai
+`db.$transaction([...])` (bentuk array/batch, bukan bentuk callback
+interaktif) sebagai gantinya.

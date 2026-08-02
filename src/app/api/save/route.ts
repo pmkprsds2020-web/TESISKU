@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { db } from "@/lib/db"
+import { db, withDbRetry } from "@/lib/db"
 import { getRespondentCookie } from "@/lib/auth"
 import { scoreCesdr, scorePsqi, scoreMos, scoreBullying, scoreReligiosity } from "@/lib/scoring"
 import { CESDR_HIGH_RISK_ITEM, CESDR_HIGH_RISK_THRESHOLD, StageId } from "@/lib/instruments"
@@ -57,7 +57,10 @@ export async function POST(req: NextRequest) {
   const { stage, answers, stageIndex, complete } = body
   devLog("[save/POST] stage:", stage, "code:", code, "answers keys:", Object.keys(answers ?? {}).length)
 
-  const r = await db.respondent.findUnique({ where: { code } })
+  // Retry: this is the very first DB call on every save request and is
+  // read-only (safe to retry) — the most common place the pooler-exhaustion
+  // errors surfaced in production logs.
+  const r = await withDbRetry(() => db.respondent.findUnique({ where: { code } }))
   if (!r) return NextResponse.json({ error: "not_found" }, { status: 404 })
 
   const next: Partial<{ currentStage: string; stageIndex: number; status: string; highRisk: boolean; consentGiven: boolean; completedAt: Date }> = {}
@@ -75,9 +78,14 @@ export async function POST(req: NextRequest) {
     const data = JSON.stringify(answers)
     next.currentStage = "cesdr"
     next.stageIndex = 0
-    // PERF: these two writes touch different tables and don't depend on
-    // each other's result — run them concurrently instead of sequentially.
-    await Promise.all([
+    // CONNECTION-POOL FIX: these two writes touch different tables and
+    // don't depend on each other's result. They used to run via
+    // Promise.all (concurrent), but under connection_limit=1 (required for
+    // the Supabase transaction pooler — see src/lib/db.ts) that meant one
+    // of them had to queue for the single available connection instead of
+    // actually running in parallel. db.$transaction sends both over one
+    // connection efficiently, and atomically (both succeed or neither does).
+    await db.$transaction([
       db.demographic.upsert({
         where: { respondentId: r.id },
         update: { data },
@@ -118,7 +126,7 @@ export async function POST(req: NextRequest) {
     const json = JSON.stringify(a)
     next.currentStage = "screentime"
     next.stageIndex = 0
-    await Promise.all([
+    await db.$transaction([
       db.psqiAnswer.upsert({
         where: { respondentId: r.id },
         update: { answers: json, totalScore: total },
@@ -135,7 +143,7 @@ export async function POST(req: NextRequest) {
     const json = JSON.stringify(answers)
     next.currentStage = "mos"
     next.stageIndex = 0
-    await Promise.all([
+    await db.$transaction([
       db.screenTimeAnswer.upsert({
         where: { respondentId: r.id },
         update: { answers: json },
@@ -154,7 +162,7 @@ export async function POST(req: NextRequest) {
     const json = JSON.stringify(a)
     next.currentStage = "bullying"
     next.stageIndex = 0
-    await Promise.all([
+    await db.$transaction([
       db.mosAnswer.upsert({
         where: { respondentId: r.id },
         update: { answers: json, totalScore: total },
@@ -173,7 +181,7 @@ export async function POST(req: NextRequest) {
     const json = JSON.stringify(a)
     next.currentStage = "religiosity"
     next.stageIndex = 0
-    await Promise.all([
+    await db.$transaction([
       db.bullyingAnswer.upsert({
         where: { respondentId: r.id },
         update: { answers: json, victimScore: total },
@@ -230,7 +238,10 @@ export async function PATCH(req: NextRequest) {
   const { stageIndex, stage, answers } = body
   devLog("[save/PATCH] stage:", stage, "code:", code, "stageIndex:", stageIndex, "answers keys:", Object.keys(answers ?? {}).length)
 
-  const r = await db.respondent.findUnique({ where: { code } })
+  // Retry: this is the very first DB call on every save request and is
+  // read-only (safe to retry) — the most common place the pooler-exhaustion
+  // errors surfaced in production logs.
+  const r = await withDbRetry(() => db.respondent.findUnique({ where: { code } }))
   if (!r) return NextResponse.json({ error: "not_found" }, { status: 404 })
 
   // Persist partial answers for the current stage (true mid-stage persistence)
