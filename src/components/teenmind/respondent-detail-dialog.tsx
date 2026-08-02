@@ -42,6 +42,19 @@ type Detail = {
     religiosity: number | null
   }
   cesdrItem18: number | null
+  psqiBreakdown: {
+    components: {
+      c1_subjectiveQuality: number
+      c2_sleepLatency: number
+      c3_sleepDuration: number
+      c4_sleepEfficiency: number
+      c5_sleepDisturbance: number
+      c6_sleepMedication: number
+      c7_daytimeDysfunction: number
+    }
+    poorSleepQuality: boolean
+    limitations: string[]
+  } | null
   auditLogs: { action: string; detail: string | null; createdAt: string }[]
 }
 
@@ -310,6 +323,40 @@ export function RespondentDetailDialog({
                   <AnswerSection title="PSQI (Tidur)" items={
                     Object.entries(detail.answers.psqi).map(([k, v]) => [k, String(v), false])
                   } />
+                  {detail.psqiBreakdown && (
+                    <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 dark:bg-indigo-950/20">
+                      <p className="mb-2 text-xs font-semibold uppercase text-indigo-700 dark:text-indigo-300">
+                        Breakdown Komponen PSQI (C1–C7)
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        {[
+                          ['C1 Kualitas', detail.psqiBreakdown.components.c1_subjectiveQuality],
+                          ['C2 Latensi', detail.psqiBreakdown.components.c2_sleepLatency],
+                          ['C3 Durasi', detail.psqiBreakdown.components.c3_sleepDuration],
+                          ['C4 Efisiensi', detail.psqiBreakdown.components.c4_sleepEfficiency],
+                          ['C5 Gangguan', detail.psqiBreakdown.components.c5_sleepDisturbance],
+                          ['C6 Obat Tidur', detail.psqiBreakdown.components.c6_sleepMedication],
+                          ['C7 Disfungsi', detail.psqiBreakdown.components.c7_daytimeDysfunction],
+                        ].map(([label, val]) => (
+                          <div key={label as string} className="rounded-lg bg-white px-2 py-1.5 text-center dark:bg-white/10">
+                            <p className="text-[10px] text-muted-foreground">{label}</p>
+                            <p className="text-sm font-bold text-indigo-700 dark:text-indigo-300">{val}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        {detail.psqiBreakdown.poorSleepQuality ? 'Kualitas tidur buruk (skor global > 5).' : 'Kualitas tidur baik (skor global ≤ 5).'}
+                      </p>
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-[11px] font-medium text-indigo-600 dark:text-indigo-400">
+                          Keterbatasan pengukuran (kuesioner adaptasi, bukan PSQI 19-item resmi)
+                        </summary>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-muted-foreground">
+                          {detail.psqiBreakdown.limitations.map((l, i) => <li key={i}>{l}</li>)}
+                        </ul>
+                      </details>
+                    </div>
+                  )}
                   <AnswerSection title="Screen Time & Medsos" items={
                     Object.entries(detail.answers.screentime).map(([k, v]) => [k, ST_LABELS[v] ?? v, false])
                   } />

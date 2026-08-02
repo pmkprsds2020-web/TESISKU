@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
+import { scorePsqi } from "@/lib/scoring"
 
 // GET /api/admin/respondent?code=SMP001001 — full detail incl. audit logs
 export async function GET(req: NextRequest) {
@@ -34,6 +35,10 @@ export async function GET(req: NextRequest) {
   const bullying = r.bullying ? (JSON.parse(r.bullying.answers) as Record<string, number>) : {}
   const religiosity = r.religiosity ? (JSON.parse(r.religiosity.answers) as Record<string, number>) : {}
 
+  // Re-derive the PSQI component breakdown (C1-C7) from the raw stored answers
+  // for display purposes. Does not overwrite the persisted totalScore.
+  const psqiBreakdown = r.psqi ? scorePsqi(psqi) : null
+
   return NextResponse.json({
     respondent: {
       code: r.code,
@@ -60,6 +65,11 @@ export async function GET(req: NextRequest) {
         mos: r.mos?.totalScore ?? null,
         bullying: r.bullying?.victimScore ?? null,
         religiosity: r.religiosity?.totalScore ?? null,
+      },
+      psqiBreakdown: psqiBreakdown && {
+        components: psqiBreakdown.components,
+        poorSleepQuality: psqiBreakdown.poorSleepQuality,
+        limitations: psqiBreakdown.limitations,
       },
       cesdrItem18: cesdr["18"] ?? null,
       auditLogs: r.auditLogs.map((l) => ({

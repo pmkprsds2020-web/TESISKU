@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
   // ─── PSQI ─────────────────────────────────────────────────────────
   } else if (stage === "psqi") {
     const a = answers as Record<string, number | string>
-    const total = scorePsqi(a)
+    const { total } = scorePsqi(a)
     const json = JSON.stringify(a)
     await db.psqiAnswer.upsert({
       where: { respondentId: r.id },

@@ -95,28 +95,40 @@ export async function GET() {
     return { n, mean: Math.round(mean * 100) / 100, median, sd: Math.round(sd * 100) / 100, min: sorted[0], max: sorted[n - 1] }
   }
 
-  // Simple correlation between CESD-R and other scores
-  function corr(a: number[], b: number[]) {
-    const n = Math.min(a.length, b.length)
+  // Pearson correlation with listwise (pairwise-complete) deletion of missing scores.
+  // IMPORTANT: respondents missing either score are EXCLUDED, never treated as 0 —
+  // substituting 0 for a missing score would bias the correlation toward/away from
+  // zero incorrectly (a missing PSQI score is not the same as "perfect sleep quality = 0").
+  function corr(a: (number | null)[], b: (number | null)[]) {
+    const pairs: [number, number][] = []
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      const av = a[i]
+      const bv = b[i]
+      if (av !== null && bv !== null && av !== undefined && bv !== undefined) {
+        pairs.push([av, bv])
+      }
+    }
+    const n = pairs.length
     if (n < 2) return 0
-    const ma = a.slice(0, n).reduce((x, y) => x + y, 0) / n
-    const mb = b.slice(0, n).reduce((x, y) => x + y, 0) / n
+    const ma = pairs.reduce((s, p) => s + p[0], 0) / n
+    const mb = pairs.reduce((s, p) => s + p[1], 0) / n
     let num = 0, da = 0, db = 0
-    for (let i = 0; i < n; i++) {
-      num += (a[i] - ma) * (b[i] - mb)
-      da += (a[i] - ma) ** 2
-      db += (b[i] - mb) ** 2
+    for (const [x, y] of pairs) {
+      num += (x - ma) * (y - mb)
+      da += (x - ma) ** 2
+      db += (y - mb) ** 2
     }
     const den = Math.sqrt(da * db)
     return den === 0 ? 0 : Math.round((num / den) * 100) / 100
   }
 
-  // build aligned arrays by respondent order
-  const cesdrArr = allWithScores.map((r) => r.cesdr?.totalScore ?? 0)
-  const psqiArr = allWithScores.map((r) => r.psqi?.totalScore ?? 0)
-  const mosArr = allWithScores.map((r) => r.mos?.totalScore ?? 0)
-  const bullyingArr = allWithScores.map((r) => r.bullying?.victimScore ?? 0)
-  const religArr = allWithScores.map((r) => r.religiosity?.totalScore ?? 0)
+  // build aligned arrays by respondent order — missing scores stay `null`,
+  // NOT defaulted to 0, so corr() can correctly exclude them pairwise.
+  const cesdrArr: (number | null)[] = allWithScores.map((r) => r.cesdr?.totalScore ?? null)
+  const psqiArr: (number | null)[] = allWithScores.map((r) => r.psqi?.totalScore ?? null)
+  const mosArr: (number | null)[] = allWithScores.map((r) => r.mos?.totalScore ?? null)
+  const bullyingArr: (number | null)[] = allWithScores.map((r) => r.bullying?.victimScore ?? null)
+  const religArr: (number | null)[] = allWithScores.map((r) => r.religiosity?.totalScore ?? null)
 
   return NextResponse.json({
     overview: {

@@ -28,37 +28,115 @@ export function scoreCesdr(answers: CesdrAnswers): {
 
 export type PsqiAnswers = Record<string, number | string>
 
+export type PsqiComponents = {
+  c1_subjectiveQuality: number
+  c2_sleepLatency: number
+  c3_sleepDuration: number
+  c4_sleepEfficiency: number
+  c5_sleepDisturbance: number
+  c6_sleepMedication: number
+  c7_daytimeDysfunction: number
+}
+
+export type PsqiResult = {
+  total: number
+  components: PsqiComponents
+  poorSleepQuality: boolean
+  /** Known deviations from the official 19-item PSQI, due to this app's 7-question adapted version. */
+  limitations: string[]
+}
+
+function clamp03(v: number): number {
+  if (Number.isNaN(v)) return 0
+  return Math.max(0, Math.min(3, Math.round(v)))
+}
+
+/** Parses "HH:MM" (24h, as produced by <input type="time">) into minutes since midnight. */
+function parseTimeToMinutes(t: unknown): number | null {
+  if (typeof t !== "string" || !/^\d{1,2}:\d{2}$/.test(t)) return null
+  const [h, m] = t.split(":").map(Number)
+  if (Number.isNaN(h) || Number.isNaN(m)) return null
+  return h * 60 + m
+}
+
 /**
- * Skor PSQI global (0-21). Skor >5 menunjukkan kualitas tidur buruk.
+ * Skor PSQI global (0-21), mengikuti struktur 7-komponen resmi
+ * (Buysse DJ, Reynolds CF, Monk TH, Berman SR, Kupfer DJ. Psychiatry Res. 1989).
+ * Skor global >5 = kualitas tidur buruk.
+ *
+ * CATATAN PENTING: kuesioner di aplikasi ini adalah versi ADAPTASI 7-pertanyaan
+ * untuk remaja, bukan PSQI resmi 19-item. Item 5a-5j (9 sub-penyebab gangguan
+ * tidur) dan item obat tidur (C6) tidak ditanyakan terpisah. Setiap komponen
+ * yang terpengaruh keterbatasan ini didokumentasikan di `limitations` pada
+ * hasil — cantumkan ini sebagai keterbatasan instrumen di bab metode tesis.
  */
-export function scorePsqi(answers: PsqiAnswers): number {
-  // C2: Latensi tidur
-  let c2 = 0
-  const lat = Number(answers.sleepLatency ?? 0)
-  if (lat > 60) c2 += 2
-  else if (lat > 30) c2 += 1
-  c2 += Number(answers.sleepDisturbance ?? 0)
+export function scorePsqi(answers: PsqiAnswers): PsqiResult {
+  const limitations: string[] = []
 
-  // C4: Efisiensi tidur
-  const actual = Number(answers.actualSleep ?? 0)
+  // C1 — Kualitas tidur subjektif: item "sleepQuality" sudah berskala resmi 0-3.
+  const c1 = clamp03(Number(answers.sleepQuality ?? 0))
+
+  // C2 — Latensi tidur: skor resmi = (skor menit-untuk-tertidur) + (skor item 5a),
+  // masing-masing 0-3, dijumlah lalu dipetakan ke 0-3. Kuesioner ini tidak
+  // punya item 5a terpisah, jadi C2 hanya memakai skor menit-untuk-tertidur.
+  const latencyMinutes = Number(answers.sleepLatency ?? 0)
+  const c2 = latencyMinutes <= 15 ? 0 : latencyMinutes <= 30 ? 1 : latencyMinutes <= 60 ? 2 : 3
+  limitations.push(
+    "C2 (latensi tidur): hanya memakai skor menit-untuk-tertidur karena item resmi 5a ('tidak bisa tidur dalam 30 menit') tidak ditanyakan terpisah."
+  )
+
+  // C3 — Durasi tidur: cutoff resmi berdasarkan jam tidur aktual.
+  const hours = Number(answers.actualSleep ?? 0)
+  const c3 = hours > 7 ? 0 : hours >= 6 ? 1 : hours >= 5 ? 2 : 3
+
+  // C4 — Efisiensi tidur kebiasaan = (jam tidur aktual / jam di tempat tidur) x 100%,
+  // jam di tempat tidur dihitung dari selisih waketime - bedtime (menangani lintas tengah malam).
+  const bedMin = parseTimeToMinutes(answers.bedtime)
+  const wakeMin = parseTimeToMinutes(answers.waketime)
   let c4 = 0
-  if (actual >= 7) c4 = 0
-  else if (actual >= 6) c4 = 1
-  else if (actual >= 5) c4 = 2
-  else c4 = 3
+  if (bedMin !== null && wakeMin !== null && hours > 0) {
+    let timeInBedMin = wakeMin - bedMin
+    if (timeInBedMin <= 0) timeInBedMin += 24 * 60 // tidur melewati tengah malam
+    const timeInBedHours = timeInBedMin / 60
+    const efficiency = timeInBedHours > 0 ? (hours / timeInBedHours) * 100 : 0
+    c4 = efficiency >= 85 ? 0 : efficiency >= 75 ? 1 : efficiency >= 65 ? 2 : 3
+  } else {
+    limitations.push("C4 (efisiensi tidur): jam tidur/bangun tidak lengkap, komponen diberi skor 0.")
+  }
 
-  // C5: Gangguan tidur
-  const c5 = Number(answers.sleepDisturbance ?? 0)
+  // C5 — Gangguan tidur: resmi = rata-rata 9 sub-item (5b-5j), masing-masing 0-3,
+  // dijumlah 0-27 lalu dipetakan ke 0-3. Kuesioner ini hanya punya SATU item
+  // gabungan (0-3), dipakai langsung sebagai proksi C5.
+  const c5 = clamp03(Number(answers.sleepDisturbance ?? 0))
+  limitations.push("C5 (gangguan tidur): memakai satu item gabungan, bukan rata-rata 9 sub-item resmi PSQI (5b-5j).")
 
-  // C7: Disfungsi siang hari
-  const c7 = Number(answers.daySleepiness ?? 0)
+  // C6 — Penggunaan obat tidur: TIDAK ditanyakan sama sekali di kuesioner ini.
+  // Diberi skor 0 untuk semua responden — ini bukan hasil pengukuran, melainkan
+  // asumsi tidak ada penggunaan obat tidur, dan harus dicantumkan sebagai keterbatasan.
+  const c6 = 0
+  limitations.push("C6 (obat tidur): item ini tidak ada di kuesioner; skor selalu 0 untuk semua responden (bukan hasil pengukuran).")
 
-  // C1: Kualitas subjektif
-  const c1 = Number(answers.sleepQuality ?? 0)
+  // C7 — Disfungsi siang hari: resmi = rata-rata 2 sub-item (susah tetap terjaga +
+  // kurang semangat), 0-6, dipetakan ke 0-3. Hanya ada 1 item ("daySleepiness") di sini.
+  const c7 = clamp03(Number(answers.daySleepiness ?? 0))
+  limitations.push("C7 (disfungsi siang hari): memakai satu item ('mengantuk saat aktivitas'), bukan rata-rata 2 sub-item resmi PSQI.")
 
-  // Total global (simplified)
-  const total = Math.min(21, c1 + c2 + c4 + c5 + c7)
-  return total
+  const total = c1 + c2 + c3 + c4 + c5 + c6 + c7
+
+  return {
+    total,
+    components: {
+      c1_subjectiveQuality: c1,
+      c2_sleepLatency: c2,
+      c3_sleepDuration: c3,
+      c4_sleepEfficiency: c4,
+      c5_sleepDisturbance: c5,
+      c6_sleepMedication: c6,
+      c7_daytimeDysfunction: c7,
+    },
+    poorSleepQuality: total > 5,
+    limitations,
+  }
 }
 
 export type MosAnswers = Record<number, number>
