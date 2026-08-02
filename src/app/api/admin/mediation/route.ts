@@ -77,7 +77,8 @@ export async function POST(req: NextRequest) {
     const ssRes = ys.reduce((sum, yi, i) => sum + (yi - (a + b * xs[i])) ** 2, 0)
     const se = Math.sqrt(ssRes / (n - 2)) / Math.sqrt(ssXX)
     const t = se > 0 ? b / se : 0
-    const p = 2 * (1 - normalCDF(Math.abs(t)))
+    // p-value from the t-distribution with df = n - 2 (was: normal approximation)
+    const p = tDistPValue(t, n - 2)
     const rSquared = ssYY > 0 ? 1 - ssRes / ssYY : 0
     return { a, b, se, t, p, rSquared }
   }
@@ -105,8 +106,9 @@ export async function POST(req: NextRequest) {
   const se3 = XtX3Inv ? [Math.sqrt(sigmaSq3 * XtX3Inv[1][1]), Math.sqrt(sigmaSq3 * XtX3Inv[2][2])] : [0, 0]
   const t3_c = se3[0] > 0 ? step3_c / se3[0] : 0
   const t3_b = se3[1] > 0 ? step3_b / se3[1] : 0
-  const p3_c = 2 * (1 - normalCDF(Math.abs(t3_c)))
-  const p3_b = 2 * (1 - normalCDF(Math.abs(t3_b)))
+  // p-values from the t-distribution with df = n - 3 (was: normal approximation)
+  const p3_c = tDistPValue(t3_c, n - 3)
+  const p3_b = tDistPValue(t3_b, n - 3)
 
   // Step 4: Indirect effect = a * b
   const indirectEffect = step2.b * step3_b
@@ -263,4 +265,64 @@ function normalCDF(x: number): number {
   const d = 0.3989423 * Math.exp(-x * x / 2)
   const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))))
   return x > 0 ? 1 - p : p
+}
+
+// Two-tailed p-value for a t-distributed statistic with `df` degrees of freedom.
+// Identity: P(|T| > |t|) = I_x(df/2, 1/2), x = df / (df + t²)  (regularized incomplete beta)
+function tDistPValue(t: number, df: number): number {
+  if (df <= 0) return 1
+  if (t === 0) return 1
+  const x = df / (df + t * t)
+  return incompleteBeta(df / 2, 0.5, x)
+}
+
+function incompleteBeta(a: number, b: number, x: number): number {
+  if (x <= 0) return 0
+  if (x >= 1) return 1
+  const bt = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x))
+  if (x < (a + 1) / (a + b + 2)) {
+    return (bt * betacf(a, b, x)) / a
+  }
+  return 1 - (bt * betacf(b, a, 1 - x)) / b
+}
+
+function betacf(a: number, b: number, x: number): number {
+  const MAXIT = 200, EPS = 1e-12, FPMIN = 1e-300
+  const qab = a + b, qap = a + 1, qam = a - 1
+  let c = 1
+  let d = 1 - (qab * x) / qap
+  if (Math.abs(d) < FPMIN) d = FPMIN
+  d = 1 / d
+  let h = d
+  for (let m = 1; m <= MAXIT; m++) {
+    const m2 = 2 * m
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2))
+    d = 1 + aa * d
+    if (Math.abs(d) < FPMIN) d = FPMIN
+    c = 1 + aa / c
+    if (Math.abs(c) < FPMIN) c = FPMIN
+    d = 1 / d
+    h *= d * c
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2))
+    d = 1 + aa * d
+    if (Math.abs(d) < FPMIN) d = FPMIN
+    c = 1 + aa / c
+    if (Math.abs(c) < FPMIN) c = FPMIN
+    d = 1 / d
+    const del = d * c
+    h *= del
+    if (Math.abs(del - 1) < EPS) break
+  }
+  return h
+}
+
+function logGamma(x: number): number {
+  const g = 7
+  const c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7]
+  if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - logGamma(1 - x)
+  x -= 1
+  let a = c[0]
+  const t = x + g + 0.5
+  for (let i = 1; i < g + 2; i++) a += c[i] / (x + i)
+  return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a)
 }

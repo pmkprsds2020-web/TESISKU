@@ -87,7 +87,9 @@ export async function POST(req: NextRequest) {
   const XtXInv = matrixInverse(XtX)
   const seBeta = XtXInv ? XtXInv.map((row, i) => Math.sqrt(Math.max(0, sigmaSq * row[i]))) : [0, 0, 0, 0]
   const tStats = beta.map((b, i) => seBeta[i] > 0 ? b / seBeta[i] : 0)
-  const pValues = tStats.map(t => 2 * (1 - normalCDF(Math.abs(t))))
+  // p-values from the t-distribution with residual df = n - 4 (was: normal approximation)
+  const dfResidual = n - 4
+  const pValues = tStats.map(t => tDistPValue(t, dfResidual))
 
   // F-test for overall model
   const msReg = (ssTotal - ssRes) / 3
@@ -120,7 +122,7 @@ export async function POST(req: NextRequest) {
     const covB1B3 = XtXInv ? XtXInv[1][3] * sigmaSq : 0
     const seSlope = Math.sqrt(Math.max(0, varB1 + s.w ** 2 * varB3 + 2 * s.w * covB1B3))
     const tSlope = seSlope > 0 ? slope / seSlope : 0
-    const pSlope = 2 * (1 - normalCDF(Math.abs(tSlope)))
+    const pSlope = tDistPValue(tSlope, dfResidual)
     return {
       level: s.level,
       w: s.w,
@@ -245,6 +247,14 @@ function normalCDF(x: number): number {
   return x > 0 ? 1 - p : p
 }
 
+// Two-tailed p-value for a t-distributed statistic with `df` degrees of freedom.
+function tDistPValue(t: number, df: number): number {
+  if (df <= 0) return 1
+  if (t === 0) return 1
+  const x = df / (df + t * t)
+  return incompleteBeta(df / 2, 0.5, x)
+}
+
 function fDistPValue(f: number, df1: number, df2: number): number {
   if (f <= 0) return 1
   const x = df2 / (df2 + df1 * f)
@@ -254,24 +264,43 @@ function fDistPValue(f: number, df1: number, df2: number): number {
 function incompleteBeta(a: number, b: number, x: number): number {
   if (x <= 0) return 0
   if (x >= 1) return 1
-  const lbeta = Math.log(x) * a + Math.log(1 - x) * b - Math.log(a + b) - logGamma(a) - logGamma(b) + logGamma(a + b)
-  const front = Math.exp(lbeta) / a
-  let f = 1, c = 1, d = 1 - (a + b) * x / (a + 1)
-  if (Math.abs(d) < 1e-30) d = 1e-30
-  d = 1 / d; f = d
-  for (let m = 1; m <= 100; m++) {
-    const m2 = 2 * m
-    let aa = m * (b - m) * x / ((a + m2 - 1) * (a + m2))
-    d = 1 + aa * d; if (Math.abs(d) < 1e-30) d = 1e-30
-    c = 1 + aa / c; if (Math.abs(c) < 1e-30) c = 1e-30
-    d = 1 / d; f *= d * c
-    const bb = -(a + m) * (a + b + m) * x / ((a + m2) * (a + m2 + 1))
-    d = 1 + bb * d; if (Math.abs(d) < 1e-30) d = 1e-30
-    c = 1 + bb / c; if (Math.abs(c) < 1e-30) c = 1e-30
-    d = 1 / d; const delta = d * c; f *= delta
-    if (Math.abs(delta - 1) < 1e-10) break
+  // BUGFIX: previous version subtracted an extra log(a+b) term, distorting every
+  // F-distribution / t-distribution p-value by a factor of 1/(a+b).
+  const bt = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x))
+  if (x < (a + 1) / (a + b + 2)) {
+    return (bt * betacf(a, b, x)) / a
   }
-  return front * f
+  return 1 - (bt * betacf(b, a, 1 - x)) / b
+}
+
+function betacf(a: number, b: number, x: number): number {
+  const MAXIT = 200, EPS = 1e-12, FPMIN = 1e-300
+  const qab = a + b, qap = a + 1, qam = a - 1
+  let c = 1
+  let d = 1 - (qab * x) / qap
+  if (Math.abs(d) < FPMIN) d = FPMIN
+  d = 1 / d
+  let h = d
+  for (let m = 1; m <= MAXIT; m++) {
+    const m2 = 2 * m
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2))
+    d = 1 + aa * d
+    if (Math.abs(d) < FPMIN) d = FPMIN
+    c = 1 + aa / c
+    if (Math.abs(c) < FPMIN) c = FPMIN
+    d = 1 / d
+    h *= d * c
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2))
+    d = 1 + aa * d
+    if (Math.abs(d) < FPMIN) d = FPMIN
+    c = 1 + aa / c
+    if (Math.abs(c) < FPMIN) c = FPMIN
+    d = 1 / d
+    const del = d * c
+    h *= del
+    if (Math.abs(del - 1) < EPS) break
+  }
+  return h
 }
 
 function logGamma(x: number): number {

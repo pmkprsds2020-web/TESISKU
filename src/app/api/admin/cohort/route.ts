@@ -96,8 +96,8 @@ export async function POST(req: NextRequest) {
     const num = Math.pow(g1.sd ** 2 / g1.n + g2.sd ** 2 / g2.n, 2)
     const den = Math.pow(g1.sd ** 2 / g1.n, 2) / (g1.n - 1) + Math.pow(g2.sd ** 2 / g2.n, 2) / (g2.n - 1)
     const df = num / den
-    // Approximate p-value using normal distribution (simplified for large df)
-    const pValue = 2 * (1 - normalCDF(Math.abs(t)))
+    // p-value from the t-distribution with Welch-Satterthwaite df (was: normal approximation)
+    const pValue = tDistPValue(t, df)
 
     // Cohen's d effect size (pooled SD)
     const pooledSD = Math.sqrt(((g1.n - 1) * g1.sd ** 2 + (g2.n - 1) * g2.sd ** 2) / (g1.n + g2.n - 2))
@@ -196,6 +196,15 @@ function normalCDF(x: number): number {
   return x > 0 ? 1 - p : p
 }
 
+// Two-tailed p-value for a t-distributed statistic with `df` degrees of freedom.
+// Identity: P(|T| > |t|) = I_x(df/2, 1/2), x = df / (df + t²)  (regularized incomplete beta)
+function tDistPValue(t: number, df: number): number {
+  if (df <= 0) return 1
+  if (t === 0) return 1
+  const x = df / (df + t * t)
+  return incompleteBeta(df / 2, 0.5, x)
+}
+
 // F-distribution p-value approximation
 function fDistPValue(f: number, df1: number, df2: number): number {
   if (f <= 0) return 1
@@ -208,35 +217,45 @@ function fDistPValue(f: number, df1: number, df2: number): number {
 function incompleteBeta(a: number, b: number, x: number): number {
   if (x <= 0) return 0
   if (x >= 1) return 1
-  const lbeta = Math.log(x) * a + Math.log(1 - x) * b - Math.log(a + b) - logGamma(a) - logGamma(b) + logGamma(a + b)
-  const front = Math.exp(lbeta) / a
-  // Lentz's algorithm for continued fraction
-  let f = 1
-  let c = 1
-  let d = 1 - (a + b) * x / (a + 1)
-  if (Math.abs(d) < 1e-30) d = 1e-30
-  d = 1 / d
-  f = d
-  for (let m = 1; m <= 100; m++) {
-    const m2 = 2 * m
-    const aa = m * (b - m) * x / ((a + m2 - 1) * (a + m2))
-    d = 1 + aa * d
-    if (Math.abs(d) < 1e-30) d = 1e-30
-    c = 1 + aa / c
-    if (Math.abs(c) < 1e-30) c = 1e-30
-    d = 1 / d
-    f *= d * c
-    const bb = -(a + m) * (a + b + m) * x / ((a + m2) * (a + m2 + 1))
-    d = 1 + bb * d
-    if (Math.abs(d) < 1e-30) d = 1e-30
-    c = 1 + bb / c
-    if (Math.abs(c) < 1e-30) c = 1e-30
-    d = 1 / d
-    const delta = d * c
-    f *= delta
-    if (Math.abs(delta - 1) < 1e-10) break
+  // BUGFIX: previous version subtracted an extra log(a+b) term, distorting every
+  // F-distribution p-value (ANOVA, regression F-test) by a factor of 1/(a+b).
+  const bt = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x))
+  if (x < (a + 1) / (a + b + 2)) {
+    return (bt * betacf(a, b, x)) / a
   }
-  return front * f
+  // Symmetry relation for numerical stability when x is large (Numerical Recipes)
+  return 1 - (bt * betacf(b, a, 1 - x)) / b
+}
+
+// Continued fraction for the incomplete beta function (Lentz's algorithm, Numerical Recipes betacf)
+function betacf(a: number, b: number, x: number): number {
+  const MAXIT = 200, EPS = 1e-12, FPMIN = 1e-300
+  const qab = a + b, qap = a + 1, qam = a - 1
+  let c = 1
+  let d = 1 - (qab * x) / qap
+  if (Math.abs(d) < FPMIN) d = FPMIN
+  d = 1 / d
+  let h = d
+  for (let m = 1; m <= MAXIT; m++) {
+    const m2 = 2 * m
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2))
+    d = 1 + aa * d
+    if (Math.abs(d) < FPMIN) d = FPMIN
+    c = 1 + aa / c
+    if (Math.abs(c) < FPMIN) c = FPMIN
+    d = 1 / d
+    h *= d * c
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2))
+    d = 1 + aa * d
+    if (Math.abs(d) < FPMIN) d = FPMIN
+    c = 1 + aa / c
+    if (Math.abs(c) < FPMIN) c = FPMIN
+    d = 1 / d
+    const del = d * c
+    h *= del
+    if (Math.abs(del - 1) < EPS) break
+  }
+  return h
 }
 
 // Lanczos approximation for log gamma
