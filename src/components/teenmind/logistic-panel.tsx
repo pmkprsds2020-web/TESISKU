@@ -19,6 +19,8 @@ type Coefficient = {
   z: number
   pValue: number
   oddsRatio: number
+  orCI95Lower: number
+  orCI95Upper: number
   significant?: boolean
 }
 
@@ -356,6 +358,7 @@ export function LogisticPanel() {
                     <th className="px-2 py-2 text-center font-semibold">β</th>
                     <th className="px-2 py-2 text-center font-semibold">SE</th>
                     <th className="px-2 py-2 text-center font-semibold">OR</th>
+                    <th className="px-2 py-2 text-center font-semibold">CI 95%</th>
                     <th className="px-2 py-2 text-center font-semibold">z</th>
                     <th className="px-2 py-2 text-center font-semibold">p</th>
                     <th className="px-2 py-2 text-center font-semibold">Sig.</th>
@@ -368,6 +371,9 @@ export function LogisticPanel() {
                       <td className="px-2 py-2.5 text-center font-mono text-xs text-foreground">{c.beta}</td>
                       <td className="px-2 py-2.5 text-center font-mono text-xs text-muted-foreground">{c.se}</td>
                       <td className="px-2 py-2.5 text-center font-mono text-xs font-bold text-foreground">{c.oddsRatio}</td>
+                      <td className="px-2 py-2.5 text-center font-mono text-[11px] text-muted-foreground">
+                        {c.name === 'Intercept' ? '—' : `${c.orCI95Lower}–${c.orCI95Upper}`}
+                      </td>
                       <td className="px-2 py-2.5 text-center font-mono text-xs text-muted-foreground">{c.z}</td>
                       <td className="px-2 py-2.5 text-center font-mono text-xs">
                         <span className={c.pValue < 0.05 ? 'font-bold text-rose-600' : 'text-muted-foreground'}>

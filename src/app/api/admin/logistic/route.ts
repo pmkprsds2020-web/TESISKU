@@ -157,8 +157,12 @@ export async function POST(req: NextRequest) {
   const zStats = beta.map((b, i) => seBeta[i] > 0 ? b / seBeta[i] : 0)
   const pValues = zStats.map(z => 2 * (1 - normalCDF(Math.abs(z))))
 
-  // Odds ratios
+  // Odds ratios + 95% Wald confidence interval: exp(β ± 1.96·SE)
   const oddsRatios = beta.map(b => Math.exp(b))
+  const orCI95 = beta.map((b, i) => ({
+    lower: Math.exp(b - 1.96 * seBeta[i]),
+    upper: Math.exp(b + 1.96 * seBeta[i]),
+  }))
 
   // Classification accuracy
   const predictions = probs.map(p => p >= 0.5 ? 1 : 0)
@@ -220,7 +224,7 @@ export async function POST(req: NextRequest) {
     negatives,
     converged,
     coefficients: [
-      { name: "Intercept", beta: beta[0], se: seBeta[0], z: zStats[0], pValue: pValues[0], oddsRatio: oddsRatios[0] },
+      { name: "Intercept", beta: beta[0], se: seBeta[0], z: zStats[0], pValue: pValues[0], oddsRatio: oddsRatios[0], orCI95Lower: orCI95[0].lower, orCI95Upper: orCI95[0].upper },
       ...cleanPredictors.map((p: string, j: number) => ({
         name: p,
         label: PREDICTOR_LABELS[p] || p,
@@ -229,6 +233,8 @@ export async function POST(req: NextRequest) {
         z: Math.round(zStats[j + 1] * 1000) / 1000,
         pValue: Math.round(pValues[j + 1] * 10000) / 10000,
         oddsRatio: Math.round(oddsRatios[j + 1] * 1000) / 1000,
+        orCI95Lower: Math.round(orCI95[j + 1].lower * 1000) / 1000,
+        orCI95Upper: Math.round(orCI95[j + 1].upper * 1000) / 1000,
         significant: pValues[j + 1] < 0.05,
       })),
     ],
