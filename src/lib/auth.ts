@@ -18,6 +18,7 @@ export async function setAdminCookie(username: string) {
   c.set(ADMIN_COOKIE, btoa(`${username}:${Date.now()}`), {
     httpOnly: true,
     sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 60 * 60 * 12, // 12 hours
   })
@@ -38,6 +39,7 @@ export async function setRespondentCookie(code: string) {
   c.set(RESPONDENT_COOKIE, code, {
     httpOnly: true,
     sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 60 * 60 * 24 * 3, // 3 days
   })
