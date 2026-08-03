@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { db, withDbRetry } from "@/lib/db"
+import { db, withDbRetry, isTransientConnectionError } from "@/lib/db"
 import { getRespondentCookie } from "@/lib/auth"
 import { scoreCesdr, scorePsqi, scoreMos, scoreBullying, scoreReligiosity } from "@/lib/scoring"
 import { CESDR_HIGH_RISK_ITEM, CESDR_HIGH_RISK_THRESHOLD, StageId } from "@/lib/instruments"
@@ -57,13 +57,14 @@ export async function POST(req: NextRequest) {
   const { stage, answers, stageIndex, complete } = body
   devLog("[save/POST] stage:", stage, "code:", code, "answers keys:", Object.keys(answers ?? {}).length)
 
-  // Retry: this is the very first DB call on every save request and is
-  // read-only (safe to retry) — the most common place the pooler-exhaustion
-  // errors surfaced in production logs.
-  const r = await withDbRetry(() => db.respondent.findUnique({ where: { code } }))
-  if (!r) return NextResponse.json({ error: "not_found" }, { status: 404 })
+  try {
+    // Retry: this is the very first DB call on every save request and is
+    // read-only (safe to retry) — the most common place the pooler-exhaustion
+    // errors surfaced in production logs.
+    const r = await withDbRetry(() => db.respondent.findUnique({ where: { code } }))
+    if (!r) return NextResponse.json({ error: "not_found" }, { status: 404 })
 
-  const next: Partial<{ currentStage: string; stageIndex: number; status: string; highRisk: boolean; consentGiven: boolean; completedAt: Date }> = {}
+    const next: Partial<{ currentStage: string; stageIndex: number; status: string; highRisk: boolean; consentGiven: boolean; completedAt: Date }> = {}
 
   // ─── Consent ──────────────────────────────────────────────────────
   if (stage === "consent") {
@@ -218,15 +219,26 @@ export async function POST(req: NextRequest) {
     // For intermediate autosave we update index but keep current stage
   }
 
-  await db.respondent.update({
+  await withDbRetry(() => db.respondent.update({
     where: { id: r.id },
     data: next,
-  })
+  }))
 
   // Sync respondent to Supabase after update
   syncRespondentToSupabase(r, next)
 
   return NextResponse.json({ ok: true, ...next })
+  } catch (e) {
+    if (isTransientConnectionError(e)) {
+      console.error("[save/POST] db_busy:", e)
+      // 503 (not 500): tells the client this is transient and worth
+      // retrying, distinct from a real server bug. submitStage() on the
+      // frontend already treats non-401/non-2xx as retryable.
+      return NextResponse.json({ error: "db_busy", message: "Server sedang sibuk, coba lagi sebentar lagi." }, { status: 503 })
+    }
+    console.error("[save/POST] error:", e)
+    return NextResponse.json({ error: "server_error" }, { status: 500 })
+  }
 }
 
 // PATCH /api/save — autosave mid-stage (draft save when user clicks an answer)
@@ -238,6 +250,7 @@ export async function PATCH(req: NextRequest) {
   const { stageIndex, stage, answers } = body
   devLog("[save/PATCH] stage:", stage, "code:", code, "stageIndex:", stageIndex, "answers keys:", Object.keys(answers ?? {}).length)
 
+  try {
   // Retry: this is the very first DB call on every save request and is
   // read-only (safe to retry) — the most common place the pooler-exhaustion
   // errors surfaced in production logs.
@@ -325,9 +338,17 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  await db.respondent.update({ where: { id: r.id }, data: { stageIndex } })
+  await withDbRetry(() => db.respondent.update({ where: { id: r.id }, data: { stageIndex } }))
   // Sync respondent stage_index to Supabase
   syncRespondentToSupabase(r, { stageIndex })
 
   return NextResponse.json({ ok: true })
+  } catch (e) {
+    if (isTransientConnectionError(e)) {
+      console.error("[save/PATCH] db_busy:", e)
+      return NextResponse.json({ error: "db_busy", message: "Server sedang sibuk, coba lagi sebentar lagi." }, { status: 503 })
+    }
+    console.error("[save/PATCH] error:", e)
+    return NextResponse.json({ error: "server_error" }, { status: 500 })
+  }
 }

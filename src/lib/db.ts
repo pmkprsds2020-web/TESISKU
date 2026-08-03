@@ -45,12 +45,16 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
 // backoff, specifically for errors that look like transient connection/
 // pool exhaustion (not for real query errors, which fail immediately as
 // before).
-function isTransientConnectionError(e: unknown): boolean {
+export function isTransientConnectionError(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : String(e)
   return /EMAXCONNSESSION|Connection pool timeout|Can't reach database server|Timed out fetching a new connection|P1001|P1017|P2024/i.test(msg)
 }
 
-export async function withDbRetry<T>(fn: () => Promise<T>, retries = 1, delayMs = 300): Promise<T> {
+// Bumped from 1→2 retries (Aug 4 incident: sustained concurrent load from
+// many respondents saving at once kept exhausting the single retry too).
+// Backoff stays short since Route Handlers have their own execution time
+// limits — this is meant to smooth over brief queueing, not long outages.
+export async function withDbRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 300): Promise<T> {
   try {
     return await fn()
   } catch (e) {
