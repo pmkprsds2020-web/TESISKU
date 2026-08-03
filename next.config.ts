@@ -23,6 +23,22 @@ const nextConfig: NextConfig = {
       "@radix-ui/react-icons",
     ],
   },
+  // BUG FIX: sw.js itself was served with default caching, so browsers
+  // could keep running an old service worker script (which controls the
+  // caching bug fixed in public/sw.js) even after a redeploy, delaying
+  // when the fix above actually takes effect for returning visitors.
+  // no-cache forces the browser to always revalidate sw.js with the
+  // server before using it, so an updated service worker is picked up on
+  // the very next visit instead of whenever the browser feels like
+  // re-checking.
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [{ key: "Cache-Control", value: "no-cache, must-revalidate" }],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
