@@ -137,6 +137,20 @@ export function AdminDashboard() {
       ])
       const [s, r] = await Promise.all([parseJsonSafe(statsRes), parseJsonSafe(respRes)])
 
+      // BUG FIX: previously a 401 here (expired/missing admin cookie) just
+      // showed a generic error with a "Coba lagi" button, which re-ran the
+      // exact same fetch with the exact same invalid cookie — an infinite
+      // retry loop with no way back to the login screen. `mode` is
+      // persisted in localStorage (zustand persist), so a user whose admin
+      // session expired (12h cookie) could get stuck here indefinitely
+      // since the app never re-renders the login screen on its own.
+      // Now: any 401 from either endpoint sends the user straight back to
+      // admin-login instead of trapping them in the dashboard shell.
+      if (statsRes.status === 401 || respRes.status === 401) {
+        setMode('admin-login')
+        return
+      }
+
       if (!statsRes.ok || s.error) {
         throw new Error(s.message || s.error || `Gagal memuat statistik (${statsRes.status})`)
       }
@@ -152,7 +166,7 @@ export function AdminDashboard() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [setMode])
 
   useEffect(() => {
     loadData()
