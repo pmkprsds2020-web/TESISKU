@@ -54,7 +54,7 @@ export default function Home() {
     let cancelled = false
     ;(async () => {
       try {
-        const res = await fetch('/api/progress')
+        const res = await fetch('/api/progress', { credentials: 'include' })
         if (cancelled) return
         if (res.ok) {
           const data = await res.json()

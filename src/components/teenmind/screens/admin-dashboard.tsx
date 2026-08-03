@@ -132,8 +132,8 @@ export function AdminDashboard() {
         }
       }
       const [statsRes, respRes] = await Promise.all([
-        fetch('/api/admin/stats'),
-        fetch('/api/admin/respondents'),
+        fetch('/api/admin/stats', { credentials: 'include' }),
+        fetch('/api/admin/respondents', { credentials: 'include' }),
       ])
       const [s, r] = await Promise.all([parseJsonSafe(statsRes), parseJsonSafe(respRes)])
 

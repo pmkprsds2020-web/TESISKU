@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { hashPassword, verifyPassword, setAdminCookie, clearAdminCookie } from "@/lib/auth"
+import { hashPassword, verifyPassword, setAdminCookieOnResponse, clearAdminCookie } from "@/lib/auth"
 
 // POST /api/admin/login { username, password }
 export async function POST(req: NextRequest) {
@@ -9,8 +9,9 @@ export async function POST(req: NextRequest) {
   if (!u || !verifyPassword(String(password ?? ""), u.password)) {
     return NextResponse.json({ error: "Username atau password salah." }, { status: 401 })
   }
-  await setAdminCookie(u.username)
-  return NextResponse.json({ ok: true, username: u.username, name: u.name })
+  const response = NextResponse.json({ ok: true, username: u.username, name: u.name })
+  setAdminCookieOnResponse(response, u.username)
+  return response
 }
 
 // DELETE /api/admin/login — logout

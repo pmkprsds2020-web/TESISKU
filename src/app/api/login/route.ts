@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { setRespondentCookie } from "@/lib/auth"
+import { setRespondentCookieOnResponse } from "@/lib/auth"
 import { syncRespondent, syncResearchCode, syncResearchCodeUsed, syncAuditLog } from "@/lib/supabase-sync"
 
 // POST /api/login  { code: "SMP001001" }
@@ -73,9 +73,7 @@ export async function POST(req: NextRequest) {
     // Sync audit log (uses code to find UUID in Supabase)
     await syncAuditLog(respondent.code, "login", `Login dengan kode ${clean}`)
 
-    await setRespondentCookie(clean)
-
-    return NextResponse.json({
+    const response = NextResponse.json({
       code: clean,
       school: rc.school,
       status: respondent.status,
@@ -85,6 +83,8 @@ export async function POST(req: NextRequest) {
       consentGiven: respondent.consentGiven,
       respondentId: respondent.id,
     })
+    setRespondentCookieOnResponse(response, clean)
+    return response
   } catch (e) {
     console.error("[login]", e)
     return NextResponse.json({ error: "Terjadi kesalahan server." }, { status: 500 })
