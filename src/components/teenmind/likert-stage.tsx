@@ -57,15 +57,6 @@ export function LikertStage({
   const item = items[idx]
   const value = item ? answers[item.id] : undefined
 
-  // Save draft to server (without advancing)
-  const saveDraft = useCallback(() => {
-    fetch('/api/save', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stageIndex: idx, stage: stageKey, answers }),
-    })
-  }, [idx, answers, stageKey])
-
   // Navigate to next (only via button)
   const goNext = useCallback(() => {
     if (idx + 1 < TOTAL) {
@@ -115,8 +106,14 @@ export function LikertStage({
   // Handle selection — save draft, stay on same page (NO auto-advance)
   function handleSelect(v: number) {
     patchFn(item.id, v)
-    // Save draft immediately after selection
-    setTimeout(() => saveDraft(), 100)
+    // Build the payload from a freshly-merged object instead of relying on
+    // a delayed closure — avoids sending stale data missing this answer.
+    const nextAnswers = { ...answers, [item.id]: v }
+    fetch('/api/save', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stageIndex: idx, stage: stageKey, answers: nextAnswers }),
+    }).catch((err) => console.error(`[LikertStage:${stageKey}] autosave failed:`, err))
   }
 
   return (

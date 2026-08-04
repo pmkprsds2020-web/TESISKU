@@ -35,15 +35,6 @@ export function ScreenTimeScreen() {
     }
   }, [])
 
-  // Save draft (without advancing)
-  const saveDraft = useCallback(() => {
-    fetch('/api/save', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stageIndex: idx, stage: 'screentime', answers: screentime }),
-    })
-  }, [idx, screentime])
-
   // Navigate next (only via button)
   const goNext = useCallback(() => {
     cancelPendingDraft()
@@ -89,10 +80,18 @@ export function ScreenTimeScreen() {
   // Handle selection — save draft, stay on same page (NO auto-advance)
   function handleSelect(v: number) {
     patchScreenTime(q.id, v)
-    // Save draft shortly after selecting, unless navigation cancels this
-    // first and sends fresh data itself.
+    // Build the payload from a freshly-merged object (captured per click)
+    // instead of relying on the debounced saveDraft's closure over
+    // pre-click state — that was sending the PREVIOUS answer, not this one.
+    const nextAnswers = { ...screentime, [q.id]: v }
     cancelPendingDraft()
-    draftTimer.current = setTimeout(() => saveDraft(), 100)
+    draftTimer.current = setTimeout(() => {
+      fetch('/api/save', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stageIndex: idx, stage: 'screentime', answers: nextAnswers }),
+      }).catch((err) => console.error('[ScreenTimeScreen] autosave failed:', err))
+    }, 100)
   }
 
   return (

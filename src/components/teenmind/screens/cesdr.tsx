@@ -43,15 +43,6 @@ export function CesdrScreen() {
     }
   }, [])
 
-  // Save draft to server (without advancing)
-  const saveDraft = useCallback(() => {
-    fetch('/api/save', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stageIndex: idx, stage: 'cesdr', answers: cesdr }),
-    })
-  }, [idx, cesdr])
-
   // Navigate to next question (only via button)
   const goNext = useCallback(() => {
     cancelPendingDraft()
@@ -92,10 +83,18 @@ export function CesdrScreen() {
   // Select answer — saves draft, stays on same page (NO auto-advance)
   function handleSelect(v: number) {
     patchAnswers('cesdr', item.id, v)
-    // Save draft shortly after selecting, unless the respondent navigates
-    // first (goNext/goPrev cancel this and send fresh data themselves).
+    // Build the payload from a freshly-merged object (captured per click)
+    // instead of relying on the debounced saveDraft's closure over
+    // pre-click state — that was sending the PREVIOUS answer, not this one.
+    const nextAnswers = { ...cesdr, [item.id]: v }
     cancelPendingDraft()
-    draftTimer.current = setTimeout(() => saveDraft(), 100)
+    draftTimer.current = setTimeout(() => {
+      fetch('/api/save', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stageIndex: idx, stage: 'cesdr', answers: nextAnswers }),
+      }).catch((err) => console.error('[CesdrScreen] autosave failed:', err))
+    }, 100)
 
     // Check high-risk condition (item 18)
     if (item.id === CESDR_HIGH_RISK_ITEM && v >= CESDR_HIGH_RISK_THRESHOLD && !highRiskAcknowledged) {
