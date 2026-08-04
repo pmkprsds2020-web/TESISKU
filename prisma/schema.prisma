@@ -1,6 +1,3 @@
-// TeenMind Research - Prisma Schema
-// Thesis research platform for adolescent biopsychosocial depression study
-
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["multiSchema"]
@@ -8,35 +5,33 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")   // pooled connection (pgbouncer) — used at runtime by API routes
-  directUrl = env("DIRECT_URL")     // direct connection — used only by `prisma migrate`/`db push`
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
   schemas   = ["prisma_app"]
 }
 
 /// Responden (siswa SMP) yang mengikuti penelitian
 model Respondent {
-  id           String   @id @default(cuid())
-  code         String   @unique // Kode penelitian, e.g. SMP001001
-  school       String?  // Sekolah (dari kode)
-  status       String   @default("pending") // pending | in_progress | completed
-  currentStage String   @default("welcome") // welcome|consent|demographics|cesdr|psqi|screentime|mos|bullying|religiosity|complete
-  stageIndex   Int      @default(0) // indeks pertanyaan dalam stage
-  highRisk     Boolean  @default(false) // flag dari CESD-R item 18
-  consentGiven Boolean  @default(false)
-  startedAt    DateTime @default(now())
+  id           String             @id @default(cuid())
+  code         String             @unique
+  school       String?
+  status       String             @default("pending")
+  currentStage String             @default("welcome")
+  stageIndex   Int                @default(0)
+  highRisk     Boolean            @default(false)
+  consentGiven Boolean            @default(false)
+  startedAt    DateTime           @default(now())
   completedAt  DateTime?
-
-  demographic  Demographic?
-  cesdr        CesdrAnswer?
-  psqi         PsqiAnswer?
-  screentime   ScreenTimeAnswer?
-  mos          MosAnswer?
-  bullying     BullyingAnswer?
-  religiosity  ReligiosityAnswer?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
   auditLogs    AuditLog[]
-
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  bullying     BullyingAnswer?
+  cesdr        CesdrAnswer?
+  demographic  Demographic?
+  mos          MosAnswer?
+  psqi         PsqiAnswer?
+  religiosity  ReligiosityAnswer?
+  screentime   ScreenTimeAnswer?
 
   @@index([status])
   @@index([highRisk])
@@ -45,11 +40,11 @@ model Respondent {
 
 /// Kode penelitian yang dibuat admin
 model ResearchCode {
-  code        String    @id // e.g. SMP001001
-  school      String?
-  classGrade  String?
-  used        Boolean   @default(false)
-  createdAt   DateTime  @default(now())
+  code       String   @id
+  school     String?
+  classGrade String?
+  used       Boolean  @default(false)
+  createdAt  DateTime @default(now())
 
   @@schema("prisma_app")
 }
@@ -58,7 +53,7 @@ model ResearchCode {
 model AdminUser {
   id        String   @id @default(cuid())
   username  String   @unique
-  password  String // hashed
+  password  String
   name      String?
   createdAt DateTime @default(now())
 
@@ -67,114 +62,112 @@ model AdminUser {
 
 /// Data demografi responden (JSON blob untuk fleksibilitas)
 model Demographic {
-  id           String   @id @default(cuid())
-  respondentId String   @unique
+  id           String     @id @default(cuid())
+  respondentId String     @unique
+  data         String
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
   respondent   Respondent @relation(fields: [respondentId], references: [id], onDelete: Cascade)
-  data         String // JSON: { initial, age, gender, school, class, ... }
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
 
   @@schema("prisma_app")
 }
 
 /// Jawaban CESD-R (20 item)
 model CesdrAnswer {
-  id           String   @id @default(cuid())
-  respondentId String   @unique
+  id           String     @id @default(cuid())
+  respondentId String     @unique
+  answers      String
+  totalScore   Int        @default(0)
+  highRisk     Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
   respondent   Respondent @relation(fields: [respondentId], references: [id], onDelete: Cascade)
-  answers      String // JSON: { "1": 0, "2": 1, ... } 0-3
-  totalScore   Int      @default(0)
-  highRisk     Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
 
   @@schema("prisma_app")
 }
 
 /// Jawaban PSQI
 model PsqiAnswer {
-  id           String   @id @default(cuid())
-  respondentId String   @unique
+  id           String     @id @default(cuid())
+  respondentId String     @unique
+  answers      String
+  totalScore   Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
   respondent   Respondent @relation(fields: [respondentId], references: [id], onDelete: Cascade)
-  answers      String // JSON
-  totalScore   Int      @default(0) // PSQI global 0-21
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
 
   @@schema("prisma_app")
 }
 
 /// Jawaban Screen Time & Media Sosial
 model ScreenTimeAnswer {
-  id           String   @id @default(cuid())
-  respondentId String   @unique
+  id           String     @id @default(cuid())
+  respondentId String     @unique
+  answers      String
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
   respondent   Respondent @relation(fields: [respondentId], references: [id], onDelete: Cascade)
-  answers      String // JSON
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
 
   @@schema("prisma_app")
 }
 
 /// Jawaban MOS-SSS (social support)
 model MosAnswer {
-  id           String   @id @default(cuid())
-  respondentId String   @unique
+  id           String     @id @default(cuid())
+  respondentId String     @unique
+  answers      String
+  totalScore   Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
   respondent   Respondent @relation(fields: [respondentId], references: [id], onDelete: Cascade)
-  answers      String // JSON
-  totalScore   Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
 
   @@schema("prisma_app")
 }
 
 /// Jawaban Gatehouse Bullying Scale
 model BullyingAnswer {
-  id           String   @id @default(cuid())
-  respondentId String   @unique
+  id           String     @id @default(cuid())
+  respondentId String     @unique
+  answers      String
+  victimScore  Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
   respondent   Respondent @relation(fields: [respondentId], references: [id], onDelete: Cascade)
-  answers      String // JSON
-  victimScore  Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
 
   @@schema("prisma_app")
 }
 
 /// Jawaban Praktik Ibadah / Religiusitas
 model ReligiosityAnswer {
-  id           String   @id @default(cuid())
-  respondentId String   @unique
+  id           String     @id @default(cuid())
+  respondentId String     @unique
+  answers      String
+  totalScore   Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
   respondent   Respondent @relation(fields: [respondentId], references: [id], onDelete: Cascade)
-  answers      String // JSON
-  totalScore   Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
 
   @@schema("prisma_app")
 }
 
 /// Audit trail
 model AuditLog {
-  id           String   @id @default(cuid())
+  id           String      @id @default(cuid())
   respondentId String?
-  respondent   Respondent? @relation(fields: [respondentId], references: [id], onDelete: SetNull)
-  action       String // login | save | stage_complete | high_risk_flag | complete | admin_view
+  action       String
   detail       String?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime    @default(now())
+  respondent   Respondent? @relation(fields: [respondentId], references: [id])
 
   @@index([action])
-
   @@schema("prisma_app")
 }
 
 /// Key-value settings store (target respondents, schools, contact info, etc.)
 model Setting {
   key       String   @id
-  value     String // JSON-encoded value
+  value     String
   updatedAt DateTime @updatedAt
 
   @@schema("prisma_app")
 }
-
