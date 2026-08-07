@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   const filter = searchParams.get("filter") // "used" | "unused" | null
   const q = searchParams.get("q") // search by code or school
 
-  const where: Record<string, unknown> = {}
+  const where: Record<string, unknown> = { projectId: admin }
   if (filter === "used") where.used = true
   if (filter === "unused") where.used = false
   if (q) {
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
 
   // Attach respondent status
   const respondents = await db.respondent.findMany({
-    where: { code: { in: codes.map((c) => c.code) } },
+    where: { projectId: admin, code: { in: codes.map((c) => c.code) } },
     select: { code: true, status: true, highRisk: true, completedAt: true },
   })
   const respMap = new Map(respondents.map((r) => [r.code, r]))
@@ -60,15 +60,17 @@ export async function POST(req: NextRequest) {
     for (const item of body.importCodes) {
       const code = String(item.code ?? "").trim().toUpperCase()
       if (!code) continue
-      const existing = await db.researchCode.findUnique({ where: { code } })
+      const existing = await db.researchCode.findUnique({
+        where: { projectId_code: { projectId: admin, code } },
+      })
       if (existing) continue
       await db.researchCode.create({
-        data: { code, school: item.school, classGrade: item.classGrade },
+        data: { projectId: admin, code, school: item.school, classGrade: item.classGrade },
       })
       created.push(code)
     }
     await db.auditLog.create({
-      data: { action: "admin_import_codes", detail: `Imported ${created.length} codes` },
+      data: { projectId: admin, action: "admin_import_codes", detail: `Imported ${created.length} codes` },
     })
     return NextResponse.json({ created, count: created.length })
   }
@@ -84,15 +86,19 @@ export async function POST(req: NextRequest) {
     const seq = String(start + i).padStart(3, "0")
     const code = `${pf}${seq}`
     await db.researchCode.upsert({
-      where: { code },
+      where: { projectId_code: { projectId: admin, code } },
       update: { school, classGrade },
-      create: { code, school, classGrade },
+      create: { projectId: admin, code, school, classGrade },
     })
     created.push(code)
   }
 
   await db.auditLog.create({
-    data: { action: "admin_create_codes", detail: `Created ${created.length} codes: ${created[0]}..${created[created.length - 1]}` },
+    data: {
+      projectId: admin,
+      action: "admin_create_codes",
+      detail: `Created ${created.length} codes: ${created[0]}..${created[created.length - 1]}`,
+    },
   })
 
   return NextResponse.json({ created, count: created.length })
@@ -107,7 +113,9 @@ export async function DELETE(req: NextRequest) {
   const code = searchParams.get("code")
   if (!code) return NextResponse.json({ error: "code required" }, { status: 400 })
 
-  const existing = await db.respondent.findUnique({ where: { code } })
+  const existing = await db.respondent.findUnique({
+    where: { projectId_code: { projectId: admin, code } },
+  })
   if (existing) {
     return NextResponse.json(
       { error: "Kode sudah digunakan oleh responden dan tidak dapat dihapus." },
@@ -115,6 +123,6 @@ export async function DELETE(req: NextRequest) {
     )
   }
 
-  await db.researchCode.delete({ where: { code } })
+  await db.researchCode.delete({ where: { projectId_code: { projectId: admin, code } } })
   return NextResponse.json({ ok: true })
 }

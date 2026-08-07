@@ -5,11 +5,11 @@ import { getAdminCookie } from "@/lib/auth"
 // GET /api/admin/cleanup — preview what would be deleted based on dataRetentionDays setting
 export async function GET() {
   const admin = await getAdminCookie()
-  if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 1 })
+  if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   // Get retention days from settings
   let retentionDays = 365
-  const setting = await db.setting.findUnique({ where: { key: "dataRetentionDays" } })
+  const setting = await db.setting.findUnique({ where: { projectId_key: { projectId: admin, key: "dataRetentionDays" } } })
   if (setting) {
     try { retentionDays = JSON.parse(setting.value) as number } catch { /* keep default */ }
   }
@@ -20,6 +20,7 @@ export async function GET() {
   const oldRespondents = await db.respondent.findMany({
     where: {
       AND: [
+        { projectId: admin },
         { status: "completed" },
         { completedAt: { lt: cutoff } },
       ],
@@ -29,6 +30,7 @@ export async function GET() {
 
   const oldCodes = await db.researchCode.findMany({
     where: {
+      projectId: admin,
       used: false,
       createdAt: { lt: cutoff },
     },
@@ -52,7 +54,7 @@ export async function POST() {
   if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   let retentionDays = 365
-  const setting = await db.setting.findUnique({ where: { key: "dataRetentionDays" } })
+  const setting = await db.setting.findUnique({ where: { projectId_key: { projectId: admin, key: "dataRetentionDays" } } })
   if (setting) {
     try { retentionDays = JSON.parse(setting.value) as number } catch { /* keep default */ }
   }
@@ -63,6 +65,7 @@ export async function POST() {
   const deletedRespondents = await db.respondent.deleteMany({
     where: {
       AND: [
+        { projectId: admin },
         { status: "completed" },
         { completedAt: { lt: cutoff } },
       ],
@@ -72,6 +75,7 @@ export async function POST() {
   // Delete old unused codes
   const deletedCodes = await db.researchCode.deleteMany({
     where: {
+      projectId: admin,
       used: false,
       createdAt: { lt: cutoff },
     },
@@ -79,6 +83,7 @@ export async function POST() {
 
   await db.auditLog.create({
     data: {
+      projectId: admin,
       action: "admin_cleanup",
       detail: `Deleted ${deletedRespondents.count} respondents + ${deletedCodes.count} codes older than ${retentionDays} days`,
     },

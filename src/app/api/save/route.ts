@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, withDbRetry, isTransientConnectionError } from "@/lib/db"
-import { getRespondentCookie } from "@/lib/auth"
+import { getRespondentCookie, decodeRespondentCookieValue } from "@/lib/auth"
 import { scoreCesdr, scorePsqi, scoreMos, scoreBullying, scoreReligiosity } from "@/lib/scoring"
 import { CESDR_HIGH_RISK_ITEM, CESDR_HIGH_RISK_THRESHOLD, StageId } from "@/lib/instruments"
 import {
@@ -50,8 +50,10 @@ function syncRespondentToSupabase(r: Awaited<ReturnType<typeof db.respondent.fin
 
 // POST /api/save — stage completion (Lanjut button on last question)
 export async function POST(req: NextRequest) {
-  const code = await getRespondentCookie()
-  if (!code) return NextResponse.json({ error: "no_session" }, { status: 401 })
+  const raw = await getRespondentCookie()
+  const session = raw ? decodeRespondentCookieValue(raw) : null
+  if (!session) return NextResponse.json({ error: "no_session" }, { status: 401 })
+  const { code } = session
 
   const body = (await req.json()) as SaveBody
   const { stage, answers, stageIndex, complete } = body
@@ -61,7 +63,7 @@ export async function POST(req: NextRequest) {
     // Retry: this is the very first DB call on every save request and is
     // read-only (safe to retry) — the most common place the pooler-exhaustion
     // errors surfaced in production logs.
-    const r = await withDbRetry(() => db.respondent.findUnique({ where: { code } }))
+    const r = await withDbRetry(() => db.respondent.findUnique({ where: { projectId_code: { projectId: session.projectId, code } } }))
     if (!r) return NextResponse.json({ error: "not_found" }, { status: 404 })
 
     const next: Partial<{ currentStage: string; stageIndex: number; status: string; highRisk: boolean; consentGiven: boolean; completedAt: Date }> = {}
@@ -243,8 +245,10 @@ export async function POST(req: NextRequest) {
 
 // PATCH /api/save — autosave mid-stage (draft save when user clicks an answer)
 export async function PATCH(req: NextRequest) {
-  const code = await getRespondentCookie()
-  if (!code) return NextResponse.json({ error: "no_session" }, { status: 401 })
+  const raw = await getRespondentCookie()
+  const session = raw ? decodeRespondentCookieValue(raw) : null
+  if (!session) return NextResponse.json({ error: "no_session" }, { status: 401 })
+  const { code } = session
 
   const body = await req.json()
   const { stageIndex, stage, answers } = body
@@ -254,7 +258,7 @@ export async function PATCH(req: NextRequest) {
   // Retry: this is the very first DB call on every save request and is
   // read-only (safe to retry) — the most common place the pooler-exhaustion
   // errors surfaced in production logs.
-  const r = await withDbRetry(() => db.respondent.findUnique({ where: { code } }))
+  const r = await withDbRetry(() => db.respondent.findUnique({ where: { projectId_code: { projectId: session.projectId, code } } }))
   if (!r) return NextResponse.json({ error: "not_found" }, { status: 404 })
 
   // Persist partial answers for the current stage (true mid-stage persistence)

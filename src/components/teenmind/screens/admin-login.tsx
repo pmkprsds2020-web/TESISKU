@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,12 +10,43 @@ import { ArrowLeft, Loader2, ShieldCheck } from 'lucide-react'
 
 export function AdminLoginScreen() {
   const setMode = useAppStore((s) => s.setMode)
+  const [tab, setTab] = useState<'account' | 'legacy'>('account')
+
+  // New Supabase-Auth researcher account
+  const [email, setEmail] = useState('')
+  const [accountPassword, setAccountPassword] = useState('')
+
+  // Legacy admin_users login (kept for backward compatibility)
   const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
+  const [legacyPassword, setLegacyPassword] = useState('')
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleAccountSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: accountPassword }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error ?? 'Gagal masuk.')
+        setLoading(false)
+        return
+      }
+      setMode('admin')
+    } catch {
+      setError('Koneksi bermasalah.')
+      setLoading(false)
+    }
+  }
+
+  async function handleLegacySubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     setLoading(true)
@@ -22,7 +54,7 @@ export function AdminLoginScreen() {
       const res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password: legacyPassword }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -59,57 +91,128 @@ export function AdminLoginScreen() {
             </div>
             <h1 className="text-2xl font-bold text-foreground">Panel Peneliti</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              Masuk untuk melihat data dan analisis penelitian.
+              Masuk untuk melihat data dan analisis penelitian Anda sendiri.
             </p>
           </motion.div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">USERNAME</label>
-              <Input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="admin"
-                className="h-12 rounded-2xl bg-white shadow-sm"
-                disabled={loading}
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">PASSWORD</label>
-              <Input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="h-12 rounded-2xl bg-white shadow-sm"
-                disabled={loading}
-              />
-            </div>
-
-            {error && (
-              <motion.p
-                initial={{ opacity: 0, y: -5 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="rounded-xl bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-600 ring-1 ring-rose-100"
-              >
-                {error}
-              </motion.p>
-            )}
-
-            <Button
-              type="submit"
-              size="lg"
-              disabled={loading}
-              className="h-12 w-full rounded-2xl bg-gradient-to-r from-violet-500 to-indigo-500 text-base font-bold text-white shadow-lg hover:from-violet-600 hover:to-indigo-600 disabled:opacity-70"
+          <div className="mb-5 flex rounded-2xl bg-muted/50 p-1 text-sm font-semibold">
+            <button
+              type="button"
+              onClick={() => { setTab('account'); setError(null) }}
+              className={`flex-1 rounded-xl py-2 transition ${tab === 'account' ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground'}`}
             >
-              {loading ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Memeriksa...</> : 'Masuk →'}
-            </Button>
-          </form>
+              Akun Peneliti
+            </button>
+            <button
+              type="button"
+              onClick={() => { setTab('legacy'); setError(null) }}
+              className={`flex-1 rounded-xl py-2 transition ${tab === 'legacy' ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground'}`}
+            >
+              Admin Lama
+            </button>
+          </div>
 
-          <p className="mt-6 rounded-xl bg-muted/50 p-3 text-center text-xs text-muted-foreground">
-            Demo: <span className="font-mono font-semibold text-foreground">admin</span> /{' '}
-            <span className="font-mono font-semibold text-foreground">teenmind2025</span>
-          </p>
+          {tab === 'account' ? (
+            <form onSubmit={handleAccountSubmit} className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">EMAIL</label>
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="nama@email.com"
+                  className="h-12 rounded-2xl bg-white shadow-sm"
+                  disabled={loading}
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">PASSWORD</label>
+                <Input
+                  type="password"
+                  value={accountPassword}
+                  onChange={(e) => setAccountPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="h-12 rounded-2xl bg-white shadow-sm"
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="flex items-center justify-between text-xs">
+                <Link href="/register" className="font-semibold text-primary hover:underline">
+                  Daftar Peneliti
+                </Link>
+                <Link href="/forgot-password" className="font-semibold text-primary hover:underline">
+                  Lupa Password?
+                </Link>
+              </div>
+
+              {error && (
+                <motion.p
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-xl bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-600 ring-1 ring-rose-100"
+                >
+                  {error}
+                </motion.p>
+              )}
+
+              <Button
+                type="submit"
+                size="lg"
+                disabled={loading}
+                className="h-12 w-full rounded-2xl bg-gradient-to-r from-violet-500 to-indigo-500 text-base font-bold text-white shadow-lg hover:from-violet-600 hover:to-indigo-600 disabled:opacity-70"
+              >
+                {loading ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Memeriksa...</> : 'Masuk →'}
+              </Button>
+            </form>
+          ) : (
+            <form onSubmit={handleLegacySubmit} className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">USERNAME</label>
+                <Input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="admin"
+                  className="h-12 rounded-2xl bg-white shadow-sm"
+                  disabled={loading}
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">PASSWORD</label>
+                <Input
+                  type="password"
+                  value={legacyPassword}
+                  onChange={(e) => setLegacyPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="h-12 rounded-2xl bg-white shadow-sm"
+                  disabled={loading}
+                />
+              </div>
+
+              {error && (
+                <motion.p
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-xl bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-600 ring-1 ring-rose-100"
+                >
+                  {error}
+                </motion.p>
+              )}
+
+              <Button
+                type="submit"
+                size="lg"
+                disabled={loading}
+                className="h-12 w-full rounded-2xl bg-gradient-to-r from-violet-500 to-indigo-500 text-base font-bold text-white shadow-lg hover:from-violet-600 hover:to-indigo-600 disabled:opacity-70"
+              >
+                {loading ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Memeriksa...</> : 'Masuk →'}
+              </Button>
+
+              <p className="rounded-xl bg-muted/50 p-3 text-center text-xs text-muted-foreground">
+                Akun admin lama (satu akun bersama, data lama). Untuk akun terpisah per peneliti, gunakan tab &quot;Akun Peneliti&quot;.
+              </p>
+            </form>
+          )}
         </div>
       </div>
     </div>

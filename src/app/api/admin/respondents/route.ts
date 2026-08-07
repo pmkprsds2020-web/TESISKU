@@ -8,6 +8,7 @@ export async function GET() {
   if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const list = await db.respondent.findMany({
+    where: { projectId: admin },
     orderBy: { startedAt: "desc" },
     include: {
       demographic: true,

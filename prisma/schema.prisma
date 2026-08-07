@@ -10,10 +10,46 @@ datasource db {
   schemas   = ["prisma_app"]
 }
 
+/// Ruang kerja penelitian (multi-tenant). Setiap akun peneliti memiliki
+/// tepat satu Project miliknya sendiri; semua data penelitian (kode,
+/// responden, jawaban, log) diisolasi melalui projectId.
+///
+/// ownerId menyimpan:
+///   - Supabase Auth user id (uuid, dari auth.users.id) untuk akun baru
+///     yang dibuat lewat halaman Registrasi, ATAU
+///   - "legacy:<username>" untuk akun admin lama (admin_users) yang sudah
+///     ada sebelum fitur multi-tenant ini ditambahkan — datanya yang sudah
+///     ada dipindahkan ke satu Project "Legacy" otomatis (lihat
+///     prisma/migration-multitenant.sql) sehingga tidak ada data yang
+///     hilang/hangus saat migrasi.
+model Project {
+  id                String         @id @default(cuid())
+  ownerId           String         @unique // supabase auth.users.id, atau "legacy:<username>"
+  ownerEmail        String?
+  ownerName         String? // Nama Lengkap peneliti
+  username          String?        @unique // Username peneliti (opsional, unik)
+  name              String // Nama Project
+  researchTitle     String? // Judul Penelitian
+  institution        String? // Institusi
+  phone             String? // Nomor HP
+  targetRespondents Int            @default(100)
+  status            String         @default("active")
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  respondents       Respondent[]
+  researchCodes     ResearchCode[]
+  auditLogs         AuditLog[]
+  settings          Setting[]
+
+  @@schema("prisma_app")
+}
+
 /// Responden (siswa SMP) yang mengikuti penelitian
 model Respondent {
   id           String             @id @default(cuid())
-  code         String             @unique
+  projectId    String
+  project      Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  code         String
   school       String?
   status       String             @default("pending")
   currentStage String             @default("welcome")
@@ -33,23 +69,34 @@ model Respondent {
   religiosity  ReligiosityAnswer?
   screentime   ScreenTimeAnswer?
 
+  // Kode responden unik PER PROJECT (bukan global), sehingga setiap akun
+  // baru bisa mulai lagi dari RESP-0001 tanpa bentrok dengan akun lain.
+  @@unique([projectId, code])
   @@index([status])
   @@index([highRisk])
+  @@index([projectId])
   @@schema("prisma_app")
 }
 
 /// Kode penelitian yang dibuat admin
 model ResearchCode {
-  code       String   @id
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  code       String
   school     String?
   classGrade String?
   used       Boolean  @default(false)
   createdAt  DateTime @default(now())
 
+  @@unique([projectId, code])
+  @@index([projectId])
   @@schema("prisma_app")
 }
 
-/// Admin penelitian
+/// Admin penelitian (sistem login lama — dipertahankan untuk kompatibilitas
+/// mundur; akun baru sebaiknya mendaftar lewat halaman Registrasi yang
+/// memakai Supabase Auth, lihat Project.ownerId)
 model AdminUser {
   id        String   @id @default(cuid())
   username  String   @unique
@@ -153,6 +200,8 @@ model ReligiosityAnswer {
 /// Audit trail
 model AuditLog {
   id           String      @id @default(cuid())
+  projectId    String?
+  project      Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   respondentId String?
   action       String
   detail       String?
@@ -160,14 +209,19 @@ model AuditLog {
   respondent   Respondent? @relation(fields: [respondentId], references: [id])
 
   @@index([action])
+  @@index([projectId])
   @@schema("prisma_app")
 }
 
 /// Key-value settings store (target respondents, schools, contact info, etc.)
+/// Sekarang per-project — setiap akun peneliti punya pengaturannya sendiri.
 model Setting {
-  key       String   @id
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key       String
   value     String
   updatedAt DateTime @updatedAt
 
+  @@id([projectId, key])
   @@schema("prisma_app")
 }

@@ -10,7 +10,7 @@ export async function GET() {
   try {
     // buildStats() is entirely read-only, so retrying the whole thing once
     // on a transient connection-pool error (see src/lib/db.ts) is safe.
-    return await withDbRetry(buildStats)
+    return await withDbRetry(() => buildStats(admin))
   } catch (e) {
     // Previously an unhandled throw here (e.g. DB connection failure,
     // missing env var, unmigrated schema) made Next.js return a 500 with
@@ -26,7 +26,7 @@ export async function GET() {
   }
 }
 
-async function buildStats() {
+async function buildStats(projectId: string) {
   // PERF + CONNECTION-POOL FIX: with DATABASE_URL now correctly set to
   // connection_limit=1 (required for the Supabase transaction pooler under
   // Vercel's serverless concurrency — see src/lib/db.ts), firing 8 queries
@@ -48,15 +48,15 @@ async function buildStats() {
     respondents,
     allWithScores,
   ] = await db.$transaction([
-    db.researchCode.count(),
-    db.respondent.count(),
-    db.respondent.count({ where: { status: "completed" } }),
-    db.respondent.count({ where: { status: "in_progress" } }),
-    db.respondent.count({ where: { highRisk: true } }),
-    db.setting.findUnique({ where: { key: "targetRespondents" } }),
+    db.researchCode.count({ where: { projectId } }),
+    db.respondent.count({ where: { projectId } }),
+    db.respondent.count({ where: { projectId, status: "completed" } }),
+    db.respondent.count({ where: { projectId, status: "in_progress" } }),
+    db.respondent.count({ where: { projectId, highRisk: true } }),
+    db.setting.findUnique({ where: { projectId_key: { projectId, key: "targetRespondents" } } }),
     // Per day (last 14 days)
     db.respondent.findMany({
-      where: { startedAt: { gte: since } },
+      where: { projectId, startedAt: { gte: since } },
       select: { startedAt: true, status: true, school: true, highRisk: true },
     }),
     // Demographics + scores for completed respondents.
@@ -67,7 +67,7 @@ async function buildStats() {
     // it was a dead, redundant full-table query with joins run on every
     // dashboard load. Removed; this single query now covers everything.
     db.respondent.findMany({
-      where: { status: "completed" },
+      where: { projectId, status: "completed" },
       include: {
         demographic: true,
         cesdr: true,

@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   const k = Math.min(Math.max(Number(kInput) || 3, 2), 5)
 
   const respondents = await db.respondent.findMany({
-    where: { status: "completed" },
+    where: { projectId: admin, status: "completed" },
     include: {
       cesdr: true,
       psqi: true,

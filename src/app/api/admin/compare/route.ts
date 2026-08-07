@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   }
 
   const respondents = await db.respondent.findMany({
-    where: { code: { in: codes } },
+    where: { projectId: admin, code: { in: codes } },
     include: {
       demographic: true,
       cesdr: true,

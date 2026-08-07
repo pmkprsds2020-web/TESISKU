@@ -173,7 +173,14 @@ export function AdminDashboard() {
   }, [loadData])
 
   async function handleLogout() {
-    await fetch('/api/admin/login', { method: 'DELETE' }).catch(() => {})
+    // Clears both the legacy admin_users cookie (DELETE /api/admin/login)
+    // and, if this session belongs to a Supabase-Auth account, the
+    // Supabase session too (/api/auth/logout). Safe to call both — an
+    // account only ever has one of the two active.
+    await Promise.all([
+      fetch('/api/admin/login', { method: 'DELETE' }).catch(() => {}),
+      fetch('/api/auth/logout', { method: 'POST' }).catch(() => {}),
+    ])
     setMode('welcome')
   }
 

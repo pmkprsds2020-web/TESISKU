@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
   const format = searchParams.get("format") ?? "csv"
 
   const list = await db.respondent.findMany({
+    where: { projectId: admin },
     orderBy: { startedAt: "asc" },
     include: {
       demographic: true,

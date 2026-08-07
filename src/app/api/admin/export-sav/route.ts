@@ -14,6 +14,7 @@ export async function GET() {
 
   // Gather all respondent data (same as CSV export)
   const list = await db.respondent.findMany({
+    where: { projectId: admin },
     orderBy: { startedAt: "asc" },
     include: {
       demographic: true,

@@ -10,7 +10,7 @@ export async function POST() {
 
   // Gather data
   const list = await db.respondent.findMany({
-    where: { status: "completed" },
+    where: { projectId: admin, status: "completed" },
     include: {
       demographic: true,
       cesdr: true,

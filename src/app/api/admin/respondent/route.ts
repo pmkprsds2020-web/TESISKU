@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   if (!code) return NextResponse.json({ error: "code required" }, { status: 400 })
 
   const r = await db.respondent.findUnique({
-    where: { code },
+    where: { projectId_code: { projectId: admin, code } },
     include: {
       demographic: true,
       cesdr: true,

@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   const cleanControls = (controls || []).filter((c: string) => valid.includes(c) && c !== xVar && c !== yVar)
 
   const respondents = await db.respondent.findMany({
-    where: { status: "completed" },
+    where: { projectId: admin, status: "completed" },
     include: { cesdr: true, psqi: true, mos: true, bullying: true, religiosity: true, demographic: true },
   })
 

@@ -346,6 +346,97 @@ export function SettingsPanel() {
           </div>
         )}
       </Card>
+
+      <ChangePasswordCard />
     </div>
+  )
+}
+
+// ─── Ganti Password (akun peneliti baru / Supabase Auth) ────────────────
+// Hanya berlaku untuk akun yang dibuat lewat halaman Registrasi. Akun
+// admin lama (tab "Admin Lama" di layar login) tidak memakai Supabase
+// Auth sehingga tidak bisa memakai form ini.
+function ChangePasswordCard() {
+  const [email, setEmail] = useState('')
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setSuccess(false)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, oldPassword, newPassword, confirmPassword }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error ?? 'Gagal mengubah password.')
+        setLoading(false)
+        return
+      }
+      setSuccess(true)
+      setOldPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch {
+      setError('Koneksi bermasalah.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Card className="space-y-4 p-5">
+      <div className="flex items-center gap-2">
+        <ShieldCheck className="h-4 w-4 text-primary" />
+        <h3 className="text-sm font-bold">Ganti Password Akun</h3>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Berlaku untuk akun peneliti yang dibuat lewat halaman Registrasi. Isi email akun Anda beserta
+        password lama dan password baru.
+      </p>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div>
+          <Label className="mb-1.5 block text-xs">Email</Label>
+          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={loading} required />
+        </div>
+        <div>
+          <Label className="mb-1.5 block text-xs">Password Lama</Label>
+          <Input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} disabled={loading} required />
+        </div>
+        <div>
+          <Label className="mb-1.5 block text-xs">Password Baru</Label>
+          <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} disabled={loading} required />
+        </div>
+        <div>
+          <Label className="mb-1.5 block text-xs">Konfirmasi Password Baru</Label>
+          <Input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={loading} required />
+        </div>
+
+        {error && (
+          <div className="rounded-lg bg-rose-50 p-2.5 text-xs text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/20 dark:text-rose-300">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="rounded-lg bg-emerald-50 p-2.5 text-xs text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300">
+            ✅ Password berhasil diperbarui.
+          </div>
+        )}
+
+        <Button type="submit" size="sm" disabled={loading} className="w-full gap-1.5">
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+          Simpan Password Baru
+        </Button>
+      </form>
+    </Card>
   )
 }

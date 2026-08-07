@@ -1,14 +1,16 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { getRespondentCookie } from "@/lib/auth"
+import { getRespondentCookie, decodeRespondentCookieValue } from "@/lib/auth"
 
 // GET /api/progress — resume respondent session from cookie
 export async function GET() {
-  const code = await getRespondentCookie()
-  if (!code) return NextResponse.json({ error: "no_session" }, { status: 401 })
+  const raw = await getRespondentCookie()
+  if (!raw) return NextResponse.json({ error: "no_session" }, { status: 401 })
+  const parsed = decodeRespondentCookieValue(raw)
+  if (!parsed) return NextResponse.json({ error: "no_session" }, { status: 401 })
 
   const r = await db.respondent.findUnique({
-    where: { code },
+    where: { projectId_code: { projectId: parsed.projectId, code: parsed.code } },
     include: {
       demographic: true,
       cesdr: true,
@@ -43,11 +45,14 @@ export async function GET() {
 
 // DELETE /api/progress — logout
 export async function DELETE() {
-  const code = await getRespondentCookie()
-  if (code) {
-    const r = await db.respondent.findUnique({ where: { code } })
-    if (r) {
-      await db.auditLog.create({ data: { respondentId: r.id, action: "logout" } })
+  const raw = await getRespondentCookie()
+  if (raw) {
+    const parsed = decodeRespondentCookieValue(raw)
+    if (parsed) {
+      const r = await db.respondent.findUnique({ where: { projectId_code: { projectId: parsed.projectId, code: parsed.code } } })
+      if (r) {
+        await db.auditLog.create({ data: { projectId: parsed.projectId, respondentId: r.id, action: "logout" } })
+      }
     }
   }
   const { clearRespondentCookie } = await import("@/lib/auth")

@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   }
 
   const respondents = await db.respondent.findMany({
-    where: { status: "completed" },
+    where: { projectId: admin, status: "completed" },
     include: {
       demographic: true,
       cesdr: true,
