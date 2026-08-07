@@ -38,7 +38,7 @@ type ReliabilityData = {
 // benar. Screen Time ditambahkan sebagai entri eksploratif (bukan skala baku).
 const INSTRUMENTS = [
   { value: 'cesdr', label: 'CESD-R (20 item)', color: '#fb7185' },
-  { value: 'psqi', label: 'PSQI (5 item skala)', color: '#818cf8' },
+  { value: 'psqi', label: 'PSQI (14 item skala)', color: '#818cf8' },
   { value: 'mos', label: 'MOS-SSS (10 item)', color: '#fcd34d' },
   { value: 'gbs', label: 'Bullying / GBS (4 item)', color: '#fdba74' },
   { value: 'climate', label: 'Climate School (8 item)', color: '#22d3ee' },

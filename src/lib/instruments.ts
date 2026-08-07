@@ -185,30 +185,63 @@ export const CESDR_HIGH_RISK_THRESHOLD = 2 // Cukup Sering atau Hampir Setiap Ha
 
 // ============================================================
 // PSQI (Lampiran 3: Kualitas Tidur)
-// 7 pertanyaan, cut-off >5 = kualitas tidur buruk
+// Versi diperluas mendekati struktur resmi 19-item PSQI (Buysse et al. 1989):
+// C1 kualitas subjektif, C2 latensi (durasi + item 5a), C3 durasi tidur,
+// C4 efisiensi tidur, C5 gangguan tidur (rata-rata sub-item 5b-5j), C6 obat
+// tidur, C7 disfungsi siang hari (2 sub-item). Cut-off global >5 = buruk.
+//
+// CATATAN KOMPATIBILITAS: item gabungan lama "sleepDisturbance" (1 item)
+// TIDAK lagi ditampilkan di kuesioner baru — digantikan 10 sub-item granular
+// (5a-5j) di bawah. scorePsqi() di src/lib/scoring.ts tetap bisa membaca data
+// responden LAMA yang hanya punya "sleepDisturbance" (fallback ke formula
+// adaptasi sebelumnya) maupun data BARU yang punya sub-item 5a-5j (formula
+// mendekati resmi). Item "daySleepiness" (Q8) dipertahankan idnya supaya
+// data lama tetap terbaca, dan "daytimeEnthusiasm" (Q9) ditambahkan sebagai
+// sub-item kedua C7 sesuai struktur resmi.
 // ============================================================
 export type PsqiQuestion =
   | { id: string; type: "time"; label: string; icon: string }
   | { id: string; type: "number"; label: string; icon: string; unit: string; min: number; max: number }
   | { id: string; type: "likert"; label: string; icon: string; options: { value: number; label: string }[] }
 
+const PSQI_FREQUENCY_OPTIONS = [
+  { value: 0, label: "Tidak pernah (dalam 1 bulan terakhir)" },
+  { value: 1, label: "Kurang dari sekali seminggu" },
+  { value: 2, label: "Sekali atau dua kali seminggu" },
+  { value: 3, label: "Tiga kali atau lebih seminggu" },
+]
+
+// Sub-item C5 (gangguan tidur) resmi 5a-5j. 5a dipakai untuk C2 (bersama
+// durasi latensi), 5b-5j (9 item) dipakai untuk C5.
+export const PSQI_DISTURBANCE_ITEMS: { id: string; text: string; icon: string }[] = [
+  { id: "dist5a", text: "Tidak bisa tertidur dalam waktu 30 menit setelah berbaring", icon: "⏱️" },
+  { id: "dist5b", text: "Terbangun di tengah malam atau dini hari", icon: "🌃" },
+  { id: "dist5c", text: "Harus bangun untuk ke kamar mandi", icon: "🚻" },
+  { id: "dist5d", text: "Tidak bisa bernapas dengan nyaman", icon: "😮‍💨" },
+  { id: "dist5e", text: "Batuk atau mendengkur keras", icon: "😤" },
+  { id: "dist5f", text: "Merasa kedinginan", icon: "🥶" },
+  { id: "dist5g", text: "Merasa kepanasan", icon: "🥵" },
+  { id: "dist5h", text: "Mengalami mimpi buruk", icon: "😰" },
+  { id: "dist5i", text: "Merasa nyeri (sakit badan)", icon: "🤕" },
+  { id: "dist5j", text: "Alasan lain yang mengganggu tidurmu", icon: "❓" },
+]
+/** id item 5a (masuk komponen C2), untuk dirujuk oleh scorePsqi(). */
+export const PSQI_ITEM_5A_ID = "dist5a"
+/** id item 5b-5j (9 item, masuk komponen C5), untuk dirujuk oleh scorePsqi(). */
+export const PSQI_C5_SUBITEM_IDS = PSQI_DISTURBANCE_ITEMS.slice(1).map((d) => d.id)
+
 export const PSQI_QUESTIONS: PsqiQuestion[] = [
   { id: "bedtime", type: "time", label: "Biasanya, jam berapa kamu mulai tidur di malam hari? (hari sekolah)", icon: "🌙" },
   { id: "sleepLatency", type: "number", label: "Biasanya, berapa menit yang kamu butuhkan untuk bisa tertidur setelah berbaring?", icon: "⏳", unit: "menit", min: 0, max: 180 },
   { id: "waketime", type: "time", label: "Biasanya, jam berapa kamu bangun di pagi hari? (hari sekolah)", icon: "☀️" },
   { id: "actualSleep", type: "number", label: "Berapa jam total kamu benar-benar tidur setiap malam? (bukan waktu berbaring)", icon: "😴", unit: "jam", min: 0, max: 12 },
-  {
-    id: "sleepDisturbance",
-    type: "likert",
-    label: "Seberapa sering kamu mengalami gangguan tidur karena: tidak bisa tidur dalam 30 menit, terbangun tengah malam, harus ke kamar mandi, susah napas, batuk, merasa kedinginan/kepanasan, mimpi buruk, nyeri tubuh?",
-    icon: "🔄",
-    options: [
-      { value: 0, label: "Tidak pernah (dalam 1 bulan terakhir)" },
-      { value: 1, label: "Kurang dari sekali seminggu" },
-      { value: 2, label: "Sekali atau dua kali seminggu" },
-      { value: 3, label: "Tiga kali atau lebih seminggu" },
-    ],
-  },
+  ...PSQI_DISTURBANCE_ITEMS.map((d) => ({
+    id: d.id,
+    type: "likert" as const,
+    label: `Dalam 1 bulan terakhir, seberapa sering tidurmu terganggu karena: ${d.text.toLowerCase()}?`,
+    icon: d.icon,
+    options: PSQI_FREQUENCY_OPTIONS,
+  })),
   {
     id: "sleepQuality",
     type: "likert",
@@ -222,16 +255,25 @@ export const PSQI_QUESTIONS: PsqiQuestion[] = [
     ],
   },
   {
+    id: "sleepMedication",
+    type: "likert",
+    label: "Dalam 1 bulan terakhir, seberapa sering kamu minum obat (dari dokter maupun dibeli sendiri) untuk membantu tidur?",
+    icon: "💊",
+    options: PSQI_FREQUENCY_OPTIONS,
+  },
+  {
     id: "daySleepiness",
     type: "likert",
     label: "Seberapa sering kamu merasa mengantuk saat mengikuti pelajaran, makan, atau beraktivitas sosial?",
     icon: "🥱",
-    options: [
-      { value: 0, label: "Tidak pernah" },
-      { value: 1, label: "Kurang dari sekali seminggu" },
-      { value: 2, label: "Sekali atau dua kali seminggu" },
-      { value: 3, label: "Tiga kali atau lebih seminggu" },
-    ],
+    options: PSQI_FREQUENCY_OPTIONS,
+  },
+  {
+    id: "daytimeEnthusiasm",
+    type: "likert",
+    label: "Seberapa sering kamu merasa kurang bersemangat untuk menyelesaikan tugas atau kegiatan sehari-hari?",
+    icon: "🔋",
+    options: PSQI_FREQUENCY_OPTIONS,
   },
 ]
 

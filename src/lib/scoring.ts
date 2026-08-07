@@ -5,6 +5,8 @@ import {
   CESDR_HIGH_RISK_ITEM,
   CESDR_HIGH_RISK_THRESHOLD,
   CLIMATE_REVERSE_ITEM_IDS,
+  PSQI_ITEM_5A_ID,
+  PSQI_C5_SUBITEM_IDS,
 } from "./instruments"
 
 export type CesdrAnswers = Record<number, number>
@@ -65,11 +67,16 @@ function parseTimeToMinutes(t: unknown): number | null {
  * (Buysse DJ, Reynolds CF, Monk TH, Berman SR, Kupfer DJ. Psychiatry Res. 1989).
  * Skor global >5 = kualitas tidur buruk.
  *
- * CATATAN PENTING: kuesioner di aplikasi ini adalah versi ADAPTASI 7-pertanyaan
- * untuk remaja, bukan PSQI resmi 19-item. Item 5a-5j (9 sub-penyebab gangguan
- * tidur) dan item obat tidur (C6) tidak ditanyakan terpisah. Setiap komponen
- * yang terpengaruh keterbatasan ini didokumentasikan di `limitations` pada
- * hasil — cantumkan ini sebagai keterbatasan instrumen di bab metode tesis.
+ * VERSI DIPERLUAS: kuesioner sekarang menyertakan 10 sub-item gangguan tidur
+ * (5a-5j), item penggunaan obat tidur, dan 2 sub-item disfungsi siang hari —
+ * mendekati struktur 19-item resmi. Fungsi ini otomatis mendeteksi skema data:
+ *  - Jika sub-item 5a-5j & item obat tidur & item "daytimeEnthusiasm" ADA di
+ *    jawaban → dipakai formula RESMI (lihat masing-masing komponen di bawah).
+ *  - Jika TIDAK ada (data responden lama, sebelum kuesioner diperluas) →
+ *    fallback ke formula ADAPTASI 7-item lama, supaya laporan untuk
+ *    responden lama tetap bisa dihitung tanpa perlu isi ulang kuesioner.
+ * `limitations` tetap diisi untuk komponen manapun yang masih memakai
+ * fallback/pendekatan non-resmi pada suatu responden tertentu.
  */
 export function scorePsqi(answers: PsqiAnswers): PsqiResult {
   const limitations: string[] = []
@@ -78,13 +85,21 @@ export function scorePsqi(answers: PsqiAnswers): PsqiResult {
   const c1 = clamp03(Number(answers.sleepQuality ?? 0))
 
   // C2 — Latensi tidur: skor resmi = (skor menit-untuk-tertidur) + (skor item 5a),
-  // masing-masing 0-3, dijumlah lalu dipetakan ke 0-3. Kuesioner ini tidak
-  // punya item 5a terpisah, jadi C2 hanya memakai skor menit-untuk-tertidur.
+  // masing-masing 0-3, dijumlah (0-6) lalu dipetakan ke 0-3.
   const latencyMinutes = Number(answers.sleepLatency ?? 0)
-  const c2 = latencyMinutes <= 15 ? 0 : latencyMinutes <= 30 ? 1 : latencyMinutes <= 60 ? 2 : 3
-  limitations.push(
-    "C2 (latensi tidur): hanya memakai skor menit-untuk-tertidur karena item resmi 5a ('tidak bisa tidur dalam 30 menit') tidak ditanyakan terpisah."
-  )
+  const latencyScore = latencyMinutes <= 15 ? 0 : latencyMinutes <= 30 ? 1 : latencyMinutes <= 60 ? 2 : 3
+  const item5aRaw = answers[PSQI_ITEM_5A_ID]
+  let c2: number
+  if (item5aRaw !== undefined && item5aRaw !== null) {
+    const item5aScore = clamp03(Number(item5aRaw))
+    const c2Sum = latencyScore + item5aScore // 0-6
+    c2 = c2Sum === 0 ? 0 : c2Sum <= 2 ? 1 : c2Sum <= 4 ? 2 : 3
+  } else {
+    c2 = latencyScore
+    limitations.push(
+      "C2 (latensi tidur): hanya memakai skor menit-untuk-tertidur karena item resmi 5a ('tidak bisa tidur dalam 30 menit') tidak tersedia pada data responden ini (kemungkinan diisi sebelum kuesioner diperluas)."
+    )
+  }
 
   // C3 — Durasi tidur: cutoff resmi berdasarkan jam tidur aktual.
   const hours = Number(answers.actualSleep ?? 0)
@@ -105,22 +120,44 @@ export function scorePsqi(answers: PsqiAnswers): PsqiResult {
     limitations.push("C4 (efisiensi tidur): jam tidur/bangun tidak lengkap, komponen diberi skor 0.")
   }
 
-  // C5 — Gangguan tidur: resmi = rata-rata 9 sub-item (5b-5j), masing-masing 0-3,
-  // dijumlah 0-27 lalu dipetakan ke 0-3. Kuesioner ini hanya punya SATU item
-  // gabungan (0-3), dipakai langsung sebagai proksi C5.
-  const c5 = clamp03(Number(answers.sleepDisturbance ?? 0))
-  limitations.push("C5 (gangguan tidur): memakai satu item gabungan, bukan rata-rata 9 sub-item resmi PSQI (5b-5j).")
+  // C5 — Gangguan tidur: resmi = jumlah 9 sub-item (5b-5j), masing-masing 0-3
+  // (rentang 0-27), dipetakan ke 0-3.
+  const c5SubValues = PSQI_C5_SUBITEM_IDS.map((id) => answers[id]).filter((v) => v !== undefined && v !== null)
+  let c5: number
+  if (c5SubValues.length === PSQI_C5_SUBITEM_IDS.length) {
+    let c5Sum = 0
+    for (const v of c5SubValues) c5Sum += clamp03(Number(v)) // 0-27
+    c5 = c5Sum === 0 ? 0 : c5Sum <= 9 ? 1 : c5Sum <= 18 ? 2 : 3
+  } else if (answers.sleepDisturbance !== undefined && answers.sleepDisturbance !== null) {
+    c5 = clamp03(Number(answers.sleepDisturbance))
+    limitations.push("C5 (gangguan tidur): memakai satu item gabungan lama ('sleepDisturbance'), bukan jumlah 9 sub-item resmi PSQI (5b-5j) — data responden ini diisi sebelum kuesioner diperluas.")
+  } else {
+    c5 = 0
+    limitations.push("C5 (gangguan tidur): data sub-item tidak lengkap, komponen diberi skor 0.")
+  }
 
-  // C6 — Penggunaan obat tidur: TIDAK ditanyakan sama sekali di kuesioner ini.
-  // Diberi skor 0 untuk semua responden — ini bukan hasil pengukuran, melainkan
-  // asumsi tidak ada penggunaan obat tidur, dan harus dicantumkan sebagai keterbatasan.
-  const c6 = 0
-  limitations.push("C6 (obat tidur): item ini tidak ada di kuesioner; skor selalu 0 untuk semua responden (bukan hasil pengukuran).")
+  // C6 — Penggunaan obat tidur.
+  const medRaw = answers.sleepMedication
+  let c6: number
+  if (medRaw !== undefined && medRaw !== null) {
+    c6 = clamp03(Number(medRaw))
+  } else {
+    c6 = 0
+    limitations.push("C6 (obat tidur): item ini tidak tersedia pada data responden ini (kemungkinan diisi sebelum kuesioner diperluas); skor diberi 0 — bukan hasil pengukuran, melainkan asumsi tidak ada penggunaan obat tidur.")
+  }
 
-  // C7 — Disfungsi siang hari: resmi = rata-rata 2 sub-item (susah tetap terjaga +
-  // kurang semangat), 0-6, dipetakan ke 0-3. Hanya ada 1 item ("daySleepiness") di sini.
-  const c7 = clamp03(Number(answers.daySleepiness ?? 0))
-  limitations.push("C7 (disfungsi siang hari): memakai satu item ('mengantuk saat aktivitas'), bukan rata-rata 2 sub-item resmi PSQI.")
+  // C7 — Disfungsi siang hari: resmi = jumlah 2 sub-item (susah tetap terjaga +
+  // kurang semangat), 0-6, dipetakan ke 0-3.
+  const troubleAwakeRaw = answers.daySleepiness
+  const enthusiasmRaw = answers.daytimeEnthusiasm
+  let c7: number
+  if (troubleAwakeRaw !== undefined && troubleAwakeRaw !== null && enthusiasmRaw !== undefined && enthusiasmRaw !== null) {
+    const c7Sum = clamp03(Number(troubleAwakeRaw)) + clamp03(Number(enthusiasmRaw)) // 0-6
+    c7 = c7Sum === 0 ? 0 : c7Sum <= 2 ? 1 : c7Sum <= 4 ? 2 : 3
+  } else {
+    c7 = clamp03(Number(troubleAwakeRaw ?? 0))
+    limitations.push("C7 (disfungsi siang hari): memakai satu item ('mengantuk saat aktivitas'), karena sub-item kedua resmi ('kurang bersemangat') tidak tersedia pada data responden ini (kemungkinan diisi sebelum kuesioner diperluas).")
+  }
 
   const total = c1 + c2 + c3 + c4 + c5 + c6 + c7
 

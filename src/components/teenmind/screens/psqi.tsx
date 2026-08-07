@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Slider } from '@/components/ui/slider'
 import { useAppStore } from '@/lib/store'
 import { PSQI_QUESTIONS } from '@/lib/instruments'
 import { QuestionShell } from '@/components/teenmind/question-shell'
@@ -100,31 +99,6 @@ export function PsqiScreen() {
               className="h-16 w-32 rounded-2xl border-2 bg-white text-center text-2xl font-bold shadow-sm focus-visible:ring-primary"
             />
             <span className="text-lg font-semibold text-muted-foreground">{q.unit}</span>
-          </div>
-        )}
-
-        {q.type === 'slider' && (
-          <div className="px-2 py-3">
-            <div className="mb-3 text-center">
-              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-4 py-1.5 text-2xl font-bold text-indigo-600">
-                {value ?? q.min}<span className="text-base font-medium text-indigo-400">{q.unit}</span>
-              </span>
-            </div>
-            <Slider
-              value={[Number(value ?? q.min)]}
-              min={q.min}
-              max={q.max}
-              step={q.step}
-              onValueChange={(v) => {
-                patchPsqi(q.id, v[0])
-                setError(null)
-              }}
-              className="py-2"
-            />
-            <div className="mt-1 flex justify-between text-xs text-muted-foreground">
-              <span>{q.min}{q.unit}</span>
-              <span>{q.max}{q.unit}</span>
-            </div>
           </div>
         )}
 

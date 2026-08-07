@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
-import { CLIMATE_REVERSE_ITEM_IDS } from "@/lib/instruments"
+import { CLIMATE_REVERSE_ITEM_IDS, PSQI_C5_SUBITEM_IDS, PSQI_ITEM_5A_ID } from "@/lib/instruments"
 
 // POST /api/admin/reliability
 // Body: { instrument: "cesdr"|"psqi"|"mos"|"gbs"|"climate"|"religiosity"|"screentime" }
@@ -14,11 +14,20 @@ import { CLIMATE_REVERSE_ITEM_IDS } from "@/lib/instruments"
 // mengambil item 1-8 yaitu GBS 1-4 tercampur Climate 5-8, membuang item 9-12
 // sepenuhnya). Sekarang GBS dan Climate School dipisah jadi dua instrumen
 // analisis tersendiri, sesuai perbaikan skoring di src/lib/scoring.ts.
+//
+// NOTE (PSQI diperluas): field PSQI dulu mencampur item mentah "sleepLatency"
+// (menit, 0-180) dan "actualSleep" (jam, 0-12) langsung dengan item skala 0-3
+// dalam satu pool item untuk Cronbach's alpha — secara metodologis kurang
+// tepat karena skalanya tidak sebanding. Sekarang dipakai HANYA item berskala
+// 0-3 resmi: 10 sub-item gangguan tidur (5a-5j), kualitas tidur, obat tidur,
+// dan 2 sub-item disfungsi siang hari (14 item total).
 type Instrument = "cesdr" | "psqi" | "mos" | "gbs" | "climate" | "religiosity" | "screentime"
+
+const PSQI_SCALE_FIELDS = [PSQI_ITEM_5A_ID, ...PSQI_C5_SUBITEM_IDS, "sleepQuality", "sleepMedication", "daySleepiness", "daytimeEnthusiasm"]
 
 const INSTRUMENT_CONFIG: Record<Instrument, { table: "cesdr" | "psqi" | "mos" | "bullying" | "religiosity" | "screentime"; numItems: number; itemOffset: number; reverseItems?: number[] }> = {
   cesdr: { table: "cesdr", numItems: 20, itemOffset: 1 },
-  psqi: { table: "psqi", numItems: 7, itemOffset: 0 }, // named fields, not numeric item ids — handled separately below
+  psqi: { table: "psqi", numItems: PSQI_SCALE_FIELDS.length, itemOffset: 0 }, // named fields, not numeric item ids — handled separately below
   mos: { table: "mos", numItems: 10, itemOffset: 1 },
   gbs: { table: "bullying", numItems: 4, itemOffset: 1 },
   climate: { table: "bullying", numItems: 8, itemOffset: 5, reverseItems: CLIMATE_REVERSE_ITEM_IDS },
@@ -30,7 +39,7 @@ const SCREENTIME_ORDINAL_FIELDS = ["weekdayScreen", "weekendScreen", "socialComp
 
 const INSTRUMENT_NAMES: Record<Instrument, string> = {
   cesdr: "CESD-R (Depresi)",
-  psqi: "PSQI (Kualitas Tidur)",
+  psqi: "PSQI (Kualitas Tidur, 14 item skala 0-3)",
   mos: "MOS-SSS (Dukungan Sosial)",
   gbs: "Gatehouse Bullying Scale (GBS)",
   climate: "Climate School (Iklim Sekolah)",
@@ -70,8 +79,12 @@ export async function POST(req: NextRequest) {
     const items: number[] = []
 
     if (instrument === "psqi") {
-      // PSQI uses named fields, not numeric 1..k ids — skip non-numeric/time fields.
-      for (const key of ["sleepLatency", "actualSleep", "sleepDisturbance", "sleepQuality", "daySleepiness"]) {
+      // Hanya item berskala 0-3 resmi (lihat PSQI_SCALE_FIELDS). Responden
+      // lama (sebelum kuesioner diperluas) tidak akan punya field 5a-5j/
+      // sleepMedication/daytimeEnthusiasm lengkap dan otomatis ter-skip di
+      // bawah (items.length !== numItems), sehingga hanya responden dengan
+      // data lengkap versi baru yang dianalisis di sini.
+      for (const key of PSQI_SCALE_FIELDS) {
         const v = parsed[key]
         if (v !== undefined && v !== null && typeof v === "number") items.push(v)
       }
@@ -88,7 +101,7 @@ export async function POST(req: NextRequest) {
         items.push(config.reverseItems?.includes(i) ? (num === 0 ? 0 : 5 - num) : num)
       }
     }
-    if (items.length === (instrument === "psqi" ? 5 : numItems)) matrix.push(items)
+    if (items.length === numItems) matrix.push(items)
   }
 
   if (matrix.length < 3) {
@@ -122,7 +135,7 @@ export async function POST(req: NextRequest) {
 
   // Item-total correlations and alpha-if-deleted
   const itemLabels: (number | string)[] =
-    instrument === "psqi" ? ["sleepLatency", "actualSleep", "sleepDisturbance", "sleepQuality", "daySleepiness"] :
+    instrument === "psqi" ? PSQI_SCALE_FIELDS :
     instrument === "screentime" ? SCREENTIME_ORDINAL_FIELDS :
     Array.from({ length: k }, (_, j) => config.itemOffset + j)
 

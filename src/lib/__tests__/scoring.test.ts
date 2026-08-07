@@ -43,37 +43,120 @@ describe("scoreCesdr", () => {
 })
 
 describe("scorePsqi", () => {
-  it("computes poor sleep quality when global score > 5", () => {
-    const r = scorePsqi({
-      sleepQuality: 3,
-      sleepLatency: 90, // c2 = 3
-      actualSleep: 3, // c3 = 3
-      bedtime: "23:00",
-      waketime: "05:00", // low efficiency -> c4 likely 2-3
-      sleepDisturbance: 3,
-      daySleepiness: 3,
+  describe("skema lama (adaptasi 7-item, tanpa sub-item 5a-5j)", () => {
+    it("computes poor sleep quality when global score > 5", () => {
+      const r = scorePsqi({
+        sleepQuality: 3,
+        sleepLatency: 90, // c2 = 3
+        actualSleep: 3, // c3 = 3
+        bedtime: "23:00",
+        waketime: "05:00", // low efficiency -> c4 likely 2-3
+        sleepDisturbance: 3,
+        daySleepiness: 3,
+      })
+      expect(r.total).toBeGreaterThan(5)
+      expect(r.poorSleepQuality).toBe(true)
     })
-    expect(r.total).toBeGreaterThan(5)
-    expect(r.poorSleepQuality).toBe(true)
+
+    it("computes good sleep quality for ideal answers", () => {
+      const r = scorePsqi({
+        sleepQuality: 0,
+        sleepLatency: 5,
+        actualSleep: 8,
+        bedtime: "22:00",
+        waketime: "06:00",
+        sleepDisturbance: 0,
+        daySleepiness: 0,
+      })
+      expect(r.poorSleepQuality).toBe(false)
+    })
+
+    it("documents C6 (sleep medication) as an unmeasured limitation when absent", () => {
+      const r = scorePsqi({})
+      expect(r.components.c6_sleepMedication).toBe(0)
+      expect(r.limitations.some((l) => l.includes("C6"))).toBe(true)
+    })
+
+    it("falls back to the single 'sleepDisturbance' item for C5 and documents the limitation", () => {
+      const r = scorePsqi({ sleepDisturbance: 2 })
+      expect(r.components.c5_sleepDisturbance).toBe(2)
+      expect(r.limitations.some((l) => l.includes("C5"))).toBe(true)
+    })
+
+    it("falls back to a single item for C7 when 'daytimeEnthusiasm' is absent", () => {
+      const r = scorePsqi({ daySleepiness: 2 })
+      expect(r.components.c7_daytimeDysfunction).toBe(2)
+      expect(r.limitations.some((l) => l.includes("C7"))).toBe(true)
+    })
+
+    it("falls back to latency-minutes only for C2 when item 5a is absent", () => {
+      const r = scorePsqi({ sleepLatency: 45 }) // 45 min -> latency score 2
+      expect(r.components.c2_sleepLatency).toBe(2)
+      expect(r.limitations.some((l) => l.includes("C2"))).toBe(true)
+    })
   })
 
-  it("computes good sleep quality for ideal answers", () => {
-    const r = scorePsqi({
+  describe("skema baru (mendekati 19-item resmi, dengan sub-item 5a-5j)", () => {
+    const fullGoodAnswers = {
       sleepQuality: 0,
       sleepLatency: 5,
       actualSleep: 8,
       bedtime: "22:00",
       waketime: "06:00",
-      sleepDisturbance: 0,
+      dist5a: 0, dist5b: 0, dist5c: 0, dist5d: 0, dist5e: 0,
+      dist5f: 0, dist5g: 0, dist5h: 0, dist5i: 0, dist5j: 0,
+      sleepMedication: 0,
       daySleepiness: 0,
-    })
-    expect(r.poorSleepQuality).toBe(false)
-  })
+      daytimeEnthusiasm: 0,
+    }
 
-  it("documents C6 (sleep medication) as an unmeasured limitation", () => {
-    const r = scorePsqi({})
-    expect(r.components.c6_sleepMedication).toBe(0)
-    expect(r.limitations.some((l) => l.includes("C6"))).toBe(true)
+    it("computes C2 from latency-minutes + item 5a combined, no limitation logged", () => {
+      const r = scorePsqi({ ...fullGoodAnswers, sleepLatency: 20, dist5a: 3 }) // latency score 1 + item5a 3 = 4 -> mapped to 2
+      expect(r.components.c2_sleepLatency).toBe(2)
+      expect(r.limitations.some((l) => l.includes("C2"))).toBe(false)
+    })
+
+    it("computes C5 from the sum of 9 sub-items (5b-5j), no limitation logged", () => {
+      const r = scorePsqi({ ...fullGoodAnswers, dist5b: 3, dist5c: 3, dist5d: 3, dist5e: 3, dist5f: 3, dist5g: 3, dist5h: 3, dist5i: 3, dist5j: 3 }) // sum = 27 -> mapped to 3
+      expect(r.components.c5_sleepDisturbance).toBe(3)
+      expect(r.limitations.some((l) => l.includes("C5"))).toBe(false)
+    })
+
+    it("computes C6 directly from 'sleepMedication', no limitation logged", () => {
+      const r = scorePsqi({ ...fullGoodAnswers, sleepMedication: 3 })
+      expect(r.components.c6_sleepMedication).toBe(3)
+      expect(r.limitations.some((l) => l.includes("C6"))).toBe(false)
+    })
+
+    it("computes C7 from the sum of 2 sub-items, no limitation logged", () => {
+      const r = scorePsqi({ ...fullGoodAnswers, daySleepiness: 3, daytimeEnthusiasm: 3 }) // sum 6 -> mapped to 3
+      expect(r.components.c7_daytimeDysfunction).toBe(3)
+      expect(r.limitations.some((l) => l.includes("C7"))).toBe(false)
+    })
+
+    it("computes a minimal total (0) for an all-good/no-symptom response", () => {
+      const r = scorePsqi(fullGoodAnswers)
+      expect(r.total).toBe(0)
+      expect(r.poorSleepQuality).toBe(false)
+    })
+
+    it("computes the maximal total (21) for an all-worst response", () => {
+      const worst = {
+        sleepQuality: 3,
+        sleepLatency: 90, // latency score 3
+        actualSleep: 2, // c3 = 3
+        bedtime: "22:00",
+        waketime: "06:00", // 8h in bed vs 2h slept -> efficiency 25% -> c4 = 3
+        dist5a: 3, dist5b: 3, dist5c: 3, dist5d: 3, dist5e: 3,
+        dist5f: 3, dist5g: 3, dist5h: 3, dist5i: 3, dist5j: 3,
+        sleepMedication: 3,
+        daySleepiness: 3,
+        daytimeEnthusiasm: 3,
+      }
+      const r = scorePsqi(worst)
+      expect(r.total).toBe(21)
+      expect(r.poorSleepQuality).toBe(true)
+    })
   })
 })
 
