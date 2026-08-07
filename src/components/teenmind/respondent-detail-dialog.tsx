@@ -64,6 +64,15 @@ type Detail = {
     interpretation: string
     recommendation: string | null
   } | null
+  screenTime: {
+    total: number
+    maxScore: number
+    minScore: number
+    highScreenTime: boolean
+    category: string
+    interpretation: string
+    recommendation: string | null
+  } | null
   analysis: {
     key: string
     label: string
@@ -326,7 +335,7 @@ export function RespondentDetailDialog({
           ) : detail ? (
             <div className="px-6 py-4">
               {/* Score summary */}
-              <div className="mb-5 grid grid-cols-3 gap-2 sm:grid-cols-6">
+              <div className="mb-5 grid grid-cols-3 gap-2 sm:grid-cols-7">
                 {([
                   ['CESD-R', detail.scores.cesdr, detail.scores.cesdr !== null && detail.scores.cesdr >= 16, 'from-rose-400 to-pink-400'],
                   ['PSQI', detail.scores.psqi, detail.scores.psqi !== null && detail.scores.psqi > 5, 'from-indigo-400 to-violet-400'],
@@ -334,6 +343,7 @@ export function RespondentDetailDialog({
                   ['GBS', detail.scores.bullying, detail.scores.bullying !== null && detail.scores.bullying > 0, 'from-orange-400 to-red-400'],
                   ['Climate', detail.scores.climateSchool, detail.scores.climateSchool !== null && detail.scores.climateSchool > 16, 'from-cyan-400 to-sky-500'],
                   ['Relig', detail.scores.religiosity, detail.scores.religiosity !== null && detail.scores.religiosity < 20, 'from-teal-400 to-emerald-400'],
+                  ['Screen', detail.screenTime?.total ?? null, detail.screenTime ? detail.screenTime.category !== 'Dalam batas wajar' : false, 'from-violet-400 to-fuchsia-400'],
                 ] as const).map(([label, score, warn, color]) => (
                   <div key={label} className={`rounded-xl bg-gradient-to-br ${color} p-2.5 text-center text-white shadow-sm ${warn ? 'ring-2 ring-rose-500 ring-offset-1' : ''}`}>
                     <p className="text-[10px] font-semibold opacity-90">{label}</p>
@@ -509,6 +519,13 @@ export function RespondentDetailDialog({
                   <AnswerSection title="Screen Time & Medsos" items={
                     Object.entries(detail.answers.screentime).map(([k, v]) => [k, ST_LABELS[v] ?? v, false])
                   } />
+                  {detail.screenTime && (
+                    <div className="rounded-xl border border-violet-100 bg-violet-50/50 p-3 dark:bg-violet-950/20">
+                      <p className="text-[11px] text-muted-foreground">
+                        Skor Screen Time (deskriptif, bukan skala baku): <strong>{detail.screenTime.total} / {detail.screenTime.maxScore}</strong> — {detail.screenTime.category}
+                      </p>
+                    </div>
+                  )}
                   <AnswerSection title="MOS-SSS (Dukungan)" items={
                     Object.entries(detail.answers.mos).map(([k, v]) => [`Item ${k}`, MOS_LABELS[v] ?? v, false])
                   } />

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
-import { scorePsqi, scoreClimateSchool } from "@/lib/scoring"
+import { scorePsqi, scoreClimateSchool, scoreScreenTime } from "@/lib/scoring"
 import { buildScreeningAnalysis, buildConclusion, buildClinicalNarrative, buildRecommendations } from "@/lib/interpretation"
 
 // GET /api/admin/respondent?code=SMP001001 — full detail incl. audit logs
@@ -45,6 +45,10 @@ export async function GET(req: NextRequest) {
   // psqiBreakdown above, so it's always in sync with the current scoring logic.
   const climateSchool = r.bullying ? scoreClimateSchool(bullying) : null
 
+  // Screen Time is a descriptive (non-validated) composite — also derived live,
+  // never stored, see scoreScreenTime() for the caveats.
+  const screenTime = r.screentime ? scoreScreenTime(screentime) : null
+
   const analysis = buildScreeningAnalysis({
     cesdr: r.cesdr?.totalScore ?? null,
     cesdrHighRisk: r.cesdr?.highRisk ?? false,
@@ -53,6 +57,7 @@ export async function GET(req: NextRequest) {
     gbs: r.bullying?.victimScore ?? null,
     bullyingAnswers: r.bullying ? bullying : null,
     religiosity: r.religiosity?.totalScore ?? null,
+    screenTimeAnswers: r.screentime ? screentime : null,
   })
   const conclusion = buildConclusion(analysis)
   const clinicalNarrative = buildClinicalNarrative(analysis)
@@ -92,6 +97,7 @@ export async function GET(req: NextRequest) {
         limitations: psqiBreakdown.limitations,
       },
       climateSchool,
+      screenTime,
       analysis,
       conclusion,
       clinicalNarrative,

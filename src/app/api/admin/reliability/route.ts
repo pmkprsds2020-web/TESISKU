@@ -1,49 +1,94 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
+import { CLIMATE_REVERSE_ITEM_IDS } from "@/lib/instruments"
 
 // POST /api/admin/reliability
-// Body: { instrument: "cesdr"|"mos"|"bullying"|"religiosity" }
+// Body: { instrument: "cesdr"|"psqi"|"mos"|"gbs"|"climate"|"religiosity"|"screentime" }
 // Returns: Cronbach's alpha, item-total correlations, alpha-if-deleted
+//
+// NOTE (perbaikan): sebelumnya instrumen ini hanya menerima
+// "cesdr"|"mos"|"bullying"|"religiosity" dengan numItems HARDCODE yang salah
+// untuk MOS (ditulis 8, padahal MOS-SSS punya 10 item) dan "bullying" (ditulis
+// 8, padahal field itu berisi 12 item campuran GBS+Climate School — hasilnya
+// mengambil item 1-8 yaitu GBS 1-4 tercampur Climate 5-8, membuang item 9-12
+// sepenuhnya). Sekarang GBS dan Climate School dipisah jadi dua instrumen
+// analisis tersendiri, sesuai perbaikan skoring di src/lib/scoring.ts.
+type Instrument = "cesdr" | "psqi" | "mos" | "gbs" | "climate" | "religiosity" | "screentime"
+
+const INSTRUMENT_CONFIG: Record<Instrument, { table: "cesdr" | "psqi" | "mos" | "bullying" | "religiosity" | "screentime"; numItems: number; itemOffset: number; reverseItems?: number[] }> = {
+  cesdr: { table: "cesdr", numItems: 20, itemOffset: 1 },
+  psqi: { table: "psqi", numItems: 7, itemOffset: 0 }, // named fields, not numeric item ids — handled separately below
+  mos: { table: "mos", numItems: 10, itemOffset: 1 },
+  gbs: { table: "bullying", numItems: 4, itemOffset: 1 },
+  climate: { table: "bullying", numItems: 8, itemOffset: 5, reverseItems: CLIMATE_REVERSE_ITEM_IDS },
+  religiosity: { table: "religiosity", numItems: 8, itemOffset: 1 },
+  screentime: { table: "screentime", numItems: 5, itemOffset: 0 }, // named fields (weekdayScreen, ... sleepDelay), "platforms" excluded (multi-select)
+}
+
+const SCREENTIME_ORDINAL_FIELDS = ["weekdayScreen", "weekendScreen", "socialCompare", "cyberbullying", "sleepDelay"]
+
+const INSTRUMENT_NAMES: Record<Instrument, string> = {
+  cesdr: "CESD-R (Depresi)",
+  psqi: "PSQI (Kualitas Tidur)",
+  mos: "MOS-SSS (Dukungan Sosial)",
+  gbs: "Gatehouse Bullying Scale (GBS)",
+  climate: "Climate School (Iklim Sekolah)",
+  religiosity: "Skala Religiusitas",
+  screentime: "Screen Time & Media Sosial (deskriptif, bukan skala baku)",
+}
+
 export async function POST(req: NextRequest) {
   const admin = await getAdminCookie()
   if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
-  const { instrument } = await req.json()
-  const valid = ["cesdr", "mos", "bullying", "religiosity"]
-  if (!valid.includes(instrument)) {
+  const { instrument } = (await req.json()) as { instrument: Instrument }
+  if (!(instrument in INSTRUMENT_CONFIG)) {
     return NextResponse.json({ error: "Invalid instrument" }, { status: 400 })
   }
+  const config = INSTRUMENT_CONFIG[instrument]
 
   const respondents = await db.respondent.findMany({
     where: { projectId: admin, status: "completed" },
     include: {
       cesdr: true,
+      psqi: true,
       mos: true,
       bullying: true,
       religiosity: true,
+      screentime: true,
     },
   })
 
-  // Extract item matrix
-  const itemKey = instrument === "cesdr" ? "cesdr" : instrument
-  const numItems =
-    instrument === "cesdr" ? 20 :
-    instrument === "mos" ? 8 :
-    instrument === "bullying" ? 8 : 8
-
+  const numItems = config.numItems
   const matrix: number[][] = []
+
   for (const r of respondents) {
-    const ans = r[itemKey as "cesdr" | "mos" | "bullying" | "religiosity"]
+    const ans = r[config.table]
     if (!ans) continue
-    const parsed = JSON.parse(ans.answers) as Record<string, number>
+    const parsed = JSON.parse(ans.answers) as Record<string, number | string>
     const items: number[] = []
-    for (let i = 1; i <= numItems; i++) {
-      if (parsed[i] !== undefined && parsed[i] !== null) {
-        items.push(Number(parsed[i]))
+
+    if (instrument === "psqi") {
+      // PSQI uses named fields, not numeric 1..k ids — skip non-numeric/time fields.
+      for (const key of ["sleepLatency", "actualSleep", "sleepDisturbance", "sleepQuality", "daySleepiness"]) {
+        const v = parsed[key]
+        if (v !== undefined && v !== null && typeof v === "number") items.push(v)
+      }
+    } else if (instrument === "screentime") {
+      for (const key of SCREENTIME_ORDINAL_FIELDS) {
+        const v = parsed[key]
+        if (v !== undefined && v !== null && typeof v === "number") items.push(v)
+      }
+    } else {
+      for (let i = config.itemOffset; i < config.itemOffset + numItems; i++) {
+        const raw = parsed[i]
+        if (raw === undefined || raw === null) continue
+        const num = Number(raw)
+        items.push(config.reverseItems?.includes(i) ? (num === 0 ? 0 : 5 - num) : num)
       }
     }
-    if (items.length === numItems) matrix.push(items)
+    if (items.length === (instrument === "psqi" ? 5 : numItems)) matrix.push(items)
   }
 
   if (matrix.length < 3) {
@@ -53,7 +98,7 @@ export async function POST(req: NextRequest) {
   }
 
   const n = matrix.length
-  const k = numItems
+  const k = matrix[0].length
 
   // Compute Cronbach's alpha: α = (k / (k-1)) * (1 - Σσᵢ² / σₜ²)
   // where σᵢ² = variance of item i, σₜ² = variance of total scores
@@ -76,7 +121,12 @@ export async function POST(req: NextRequest) {
   const cronbachAlpha = totalVar > 0 ? (k / (k - 1)) * (1 - sumItemVars / totalVar) : 0
 
   // Item-total correlations and alpha-if-deleted
-  const itemStats = []
+  const itemLabels: (number | string)[] =
+    instrument === "psqi" ? ["sleepLatency", "actualSleep", "sleepDisturbance", "sleepQuality", "daySleepiness"] :
+    instrument === "screentime" ? SCREENTIME_ORDINAL_FIELDS :
+    Array.from({ length: k }, (_, j) => config.itemOffset + j)
+
+  const itemStats: { item: number | string; mean: number; sd: number; itemTotalCorr: number; alphaIfDeleted: number }[] = []
   for (let j = 0; j < k; j++) {
     // Corrected item-total correlation: correlation between item j and (total - item j)
     const restTotals = matrix.map(row => row.reduce((a, b, idx) => a + (idx === j ? 0 : b), 0))
@@ -98,7 +148,7 @@ export async function POST(req: NextRequest) {
     const alphaIfDeleted = restTotalVar > 0 ? ((k - 1) / (k - 2)) * (1 - sumRemainingVars / restTotalVar) : 0
 
     itemStats.push({
-      item: j + 1,
+      item: itemLabels[j],
       mean: Math.round(itemMeans[j] * 100) / 100,
       sd: Math.round(Math.sqrt(itemVars[j]) * 100) / 100,
       itemTotalCorr: Math.round(corr * 1000) / 1000,
@@ -116,11 +166,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     instrument,
-    instrumentName:
-      instrument === "cesdr" ? "CESD-R (Depresi)" :
-      instrument === "mos" ? "MOS-SSS (Dukungan Sosial)" :
-      instrument === "bullying" ? "Gatehouse Bullying Scale" :
-      "Skala Religiusitas",
+    instrumentName: INSTRUMENT_NAMES[instrument],
     n,
     numItems: k,
     cronbachAlpha: Math.round(cronbachAlpha * 1000) / 1000,
@@ -128,5 +174,8 @@ export async function POST(req: NextRequest) {
     totalMean: Math.round(totalMean * 100) / 100,
     totalSD: Math.round(Math.sqrt(totalVar) * 100) / 100,
     itemStats,
+    ...(instrument === "screentime" ? {
+      caveat: "Screen Time bukan skala psikometrik baku/tervalidasi. Cronbach's alpha di sini bersifat eksploratif/deskriptif, bukan bukti validitas instrumen.",
+    } : {}),
   })
 }

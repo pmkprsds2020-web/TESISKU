@@ -235,3 +235,98 @@ export function scoreReligiosity(answers: ReligiosityAnswers): number {
   for (let i = 1; i <= 8; i++) total += answers[i] ?? 0
   return total
 }
+
+export type ScreenTimeAnswers = {
+  weekdayScreen?: number // 0-4 (<1 jam ... >5 jam/hari)
+  weekendScreen?: number // 0-4
+  socialCompare?: number // 0-4 (Tidak pernah ... Selalu)
+  cyberbullying?: number // 0-2 (Tidak pernah / 1-2 kali / >2 kali)
+  sleepDelay?: number // 0-3 (Tidak pernah ... Sering ≥3x/minggu)
+  platforms?: number[] // multi-select, bukan item skala — tidak diskor
+}
+
+export type ScreenTimeResult = {
+  total: number
+  maxScore: number
+  minScore: number
+  highScreenTime: boolean
+  category: string
+  interpretation: string
+  recommendation: string | null
+}
+
+/**
+ * Skor Screen Time & Media Sosial (5 item skala, item "platforms" dikecualikan
+ * karena multi-select bukan item ordinal). Total = jumlah 5 item, range 0-17.
+ *
+ * PENTING — instrumen ini BUKAN skala psikometrik baku/tervalidasi (tidak
+ * seperti CESD-R, PSQI, MOS-SSS, dsb). Tidak ada cut-off resmi dari
+ * literatur untuk kombinasi 5 item ini. Kategori & threshold di bawah
+ * adalah heuristik deskriptif yang disusun peneliti berdasarkan:
+ *  - `highScreenTime` = true bila durasi screen time hari sekolah ATAU akhir
+ *    pekan mencapai kategori ">3 jam/hari" (nilai item ≥3), sesuai catatan
+ *    perancangan asli pada komentar SCREEN_TIME_QUESTIONS.
+ *  - Kombinasi durasi tinggi + indikator distres media sosial (social
+ *    comparison, cyberbullying, atau screen time mengganggu tidur) dipakai
+ *    sebagai penanda risiko psikososial tambahan.
+ * Cantumkan ini sebagai keterbatasan/deviasi instrumen di bab metode —
+ * TIDAK disarankan dipakai sebagai skala skrining diagnostik seperti
+ * instrumen lain, melainkan sebagai data deskriptif/kovariat.
+ */
+export function scoreScreenTime(answers: ScreenTimeAnswers): ScreenTimeResult {
+  const weekday = answers.weekdayScreen ?? 0
+  const weekend = answers.weekendScreen ?? 0
+  const socialCompare = answers.socialCompare ?? 0
+  const cyberbullying = answers.cyberbullying ?? 0
+  const sleepDelay = answers.sleepDelay ?? 0
+
+  const total = weekday + weekend + socialCompare + cyberbullying + sleepDelay
+  const maxScore = 17
+  const minScore = 0
+
+  const highScreenTime = weekday >= 3 || weekend >= 3 // ">3 jam/hari"
+  const distressSignal = cyberbullying >= 1 || sleepDelay >= 2 || socialCompare >= 3
+
+  if (highScreenTime && distressSignal) {
+    return {
+      total,
+      maxScore,
+      minScore,
+      highScreenTime,
+      category: "Screen time tinggi disertai indikator distres media sosial",
+      interpretation: "Durasi penggunaan gadget/media sosial tergolong tinggi (>3 jam/hari) dan disertai indikasi distres terkait media sosial (perbandingan sosial, cyberbullying, dan/atau gangguan tidur akibat gadget).",
+      recommendation: "Anjurkan edukasi literasi digital, pembatasan screen time terjadwal, serta pemantauan lebih lanjut bila ditemukan indikasi cyberbullying.",
+    }
+  }
+  if (highScreenTime) {
+    return {
+      total,
+      maxScore,
+      minScore,
+      highScreenTime,
+      category: "Screen time tinggi",
+      interpretation: "Durasi penggunaan gadget/media sosial tergolong tinggi (>3 jam/hari), tanpa indikator distres media sosial yang menonjol.",
+      recommendation: "Anjurkan pembatasan screen time terjadwal dan edukasi keseimbangan aktivitas.",
+    }
+  }
+  if (distressSignal) {
+    return {
+      total,
+      maxScore,
+      minScore,
+      highScreenTime,
+      category: "Indikator distres media sosial",
+      interpretation: "Durasi screen time dalam batas wajar, namun ditemukan indikasi distres terkait media sosial (perbandingan sosial, cyberbullying, dan/atau gangguan tidur akibat gadget).",
+      recommendation: "Pantau lebih lanjut, terutama bila ada laporan cyberbullying berulang.",
+    }
+  }
+  return {
+    total,
+    maxScore,
+    minScore,
+    highScreenTime,
+    category: "Dalam batas wajar",
+    interpretation: "Durasi screen time dan indikator penggunaan media sosial dalam batas wajar.",
+    recommendation: null,
+  }
+}

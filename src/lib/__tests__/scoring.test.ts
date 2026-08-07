@@ -6,6 +6,7 @@ import {
   scoreBullying,
   scoreClimateSchool,
   scoreReligiosity,
+  scoreScreenTime,
 } from "../scoring"
 
 describe("scoreCesdr", () => {
@@ -149,5 +150,41 @@ describe("scoreReligiosity", () => {
     const answers: Record<number, number> = {}
     for (let i = 1; i <= 8; i++) answers[i] = 4
     expect(scoreReligiosity(answers)).toBe(32)
+  })
+})
+
+describe("scoreScreenTime", () => {
+  it("flags highScreenTime when weekday or weekend duration is >3 jam/hari (value >= 3)", () => {
+    expect(scoreScreenTime({ weekdayScreen: 3 }).highScreenTime).toBe(true)
+    expect(scoreScreenTime({ weekendScreen: 3 }).highScreenTime).toBe(true)
+    expect(scoreScreenTime({ weekdayScreen: 2, weekendScreen: 2 }).highScreenTime).toBe(false)
+  })
+
+  it("categorizes 'dalam batas wajar' when no risk signals present", () => {
+    const r = scoreScreenTime({ weekdayScreen: 1, weekendScreen: 1, socialCompare: 0, cyberbullying: 0, sleepDelay: 0 })
+    expect(r.category).toBe("Dalam batas wajar")
+    expect(r.recommendation).toBeNull()
+  })
+
+  it("categorizes high screen time + distress combined", () => {
+    const r = scoreScreenTime({ weekdayScreen: 4, weekendScreen: 4, socialCompare: 4, cyberbullying: 2, sleepDelay: 3 })
+    expect(r.highScreenTime).toBe(true)
+    expect(r.category).toBe("Screen time tinggi disertai indikator distres media sosial")
+    expect(r.recommendation).not.toBeNull()
+  })
+
+  it("categorizes distress signal alone (low screen time but cyberbullying reported)", () => {
+    const r = scoreScreenTime({ weekdayScreen: 1, weekendScreen: 1, cyberbullying: 1 })
+    expect(r.highScreenTime).toBe(false)
+    expect(r.category).toBe("Indikator distres media sosial")
+  })
+
+  it("sums the 5 ordinal fields only, excluding platforms", () => {
+    const r = scoreScreenTime({ weekdayScreen: 2, weekendScreen: 2, socialCompare: 2, cyberbullying: 1, sleepDelay: 1, platforms: [0, 1, 2] })
+    expect(r.total).toBe(8)
+  })
+
+  it("treats missing fields as 0", () => {
+    expect(scoreScreenTime({}).total).toBe(0)
   })
 })

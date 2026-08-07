@@ -37,10 +37,14 @@ type FactorData = {
   }
 }
 
+// NOTE: "bullying" dulu satu entri gabungan yang salah (lihat penjelasan di
+// reliability-panel.tsx). Sekarang dipisah jadi "gbs" dan "climate"; MOS-SSS
+// diperbaiki dari "8 item" jadi 10 item yang benar.
 const INSTRUMENTS = [
   { value: 'cesdr', label: 'CESD-R (20 item)', color: '#fb7185' },
-  { value: 'mos', label: 'MOS-SSS (8 item)', color: '#fcd34d' },
-  { value: 'bullying', label: 'Bullying (8 item)', color: '#fdba74' },
+  { value: 'mos', label: 'MOS-SSS (10 item)', color: '#fcd34d' },
+  { value: 'gbs', label: 'Bullying / GBS (4 item)', color: '#fdba74' },
+  { value: 'climate', label: 'Climate School (8 item)', color: '#22d3ee' },
   { value: 'religiosity', label: 'Religiusitas (8 item)', color: '#86efac' },
 ]
 

@@ -1,19 +1,45 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
+import { CLIMATE_REVERSE_ITEM_IDS } from "@/lib/instruments"
 
 // POST /api/admin/factor
-// Body: { instrument: "cesdr"|"mos"|"bullying"|"religiosity" }
+// Body: { instrument: "cesdr"|"mos"|"gbs"|"climate"|"religiosity" }
 // Returns: PCA eigenvalues, factor loadings, variance explained
+//
+// NOTE (perbaikan): sama seperti /api/admin/reliability — "bullying" dulu
+// satu entri gabungan yang salah (GBS 1-4 tercampur Climate 5-8, item 9-12
+// terbuang), dan MOS-SSS ditulis 8 item padahal 10. Sekarang dipisah &
+// diperbaiki. PSQI dan Screen Time TIDAK disertakan di analisis faktor ini —
+// PSQI adalah instrumen komponen (bukan skala unidimensi untuk EFA) dan
+// Screen Time bukan skala psikometrik tervalidasi.
+type Instrument = "cesdr" | "mos" | "gbs" | "climate" | "religiosity"
+
+const INSTRUMENT_CONFIG: Record<Instrument, { table: "cesdr" | "mos" | "bullying" | "religiosity"; numItems: number; itemOffset: number; reverseItems?: number[] }> = {
+  cesdr: { table: "cesdr", numItems: 20, itemOffset: 1 },
+  mos: { table: "mos", numItems: 10, itemOffset: 1 },
+  gbs: { table: "bullying", numItems: 4, itemOffset: 1 },
+  climate: { table: "bullying", numItems: 8, itemOffset: 5, reverseItems: CLIMATE_REVERSE_ITEM_IDS },
+  religiosity: { table: "religiosity", numItems: 8, itemOffset: 1 },
+}
+
+const INSTRUMENT_NAMES: Record<Instrument, string> = {
+  cesdr: "CESD-R (Depresi)",
+  mos: "MOS-SSS (Dukungan Sosial)",
+  gbs: "Gatehouse Bullying Scale (GBS)",
+  climate: "Climate School (Iklim Sekolah)",
+  religiosity: "Skala Religiusitas",
+}
+
 export async function POST(req: NextRequest) {
   const admin = await getAdminCookie()
   if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
-  const { instrument } = await req.json()
-  const valid = ["cesdr", "mos", "bullying", "religiosity"]
-  if (!valid.includes(instrument)) {
+  const { instrument } = (await req.json()) as { instrument: Instrument }
+  if (!(instrument in INSTRUMENT_CONFIG)) {
     return NextResponse.json({ error: "Invalid instrument" }, { status: 400 })
   }
+  const config = INSTRUMENT_CONFIG[instrument]
 
   const respondents = await db.respondent.findMany({
     where: { projectId: admin, status: "completed" },
@@ -25,22 +51,20 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  const numItems =
-    instrument === "cesdr" ? 20 :
-    instrument === "mos" ? 8 :
-    instrument === "bullying" ? 8 : 8
+  const numItems = config.numItems
 
   // Build data matrix (respondents × items)
   const matrix: number[][] = []
   for (const r of respondents) {
-    const ans = r[instrument as "cesdr" | "mos" | "bullying" | "religiosity"]
+    const ans = r[config.table]
     if (!ans) continue
     const parsed = JSON.parse(ans.answers) as Record<string, number>
     const items: number[] = []
-    for (let i = 1; i <= numItems; i++) {
-      if (parsed[i] !== undefined && parsed[i] !== null) {
-        items.push(Number(parsed[i]))
-      }
+    for (let i = config.itemOffset; i < config.itemOffset + numItems; i++) {
+      const raw = parsed[i]
+      if (raw === undefined || raw === null) continue
+      const num = Number(raw)
+      items.push(config.reverseItems?.includes(i) ? (num === 0 ? 0 : 5 - num) : num)
     }
     if (items.length === numItems) matrix.push(items)
   }
@@ -133,13 +157,6 @@ export async function POST(req: NextRequest) {
   const dfBartlett = (k * (k - 1)) / 2
   const pBartlett = chiSqBartlett > 0 ? chiSquarePValue(chiSqBartlett, dfBartlett) : 1
 
-  const INSTRUMENT_NAMES: Record<string, string> = {
-    cesdr: "CESD-R (Depresi)",
-    mos: "MOS-SSS (Dukungan Sosial)",
-    bullying: "Gatehouse Bullying Scale",
-    religiosity: "Skala Religiusitas",
-  }
-
   return NextResponse.json({
     instrument,
     instrumentName: INSTRUMENT_NAMES[instrument],
@@ -170,7 +187,7 @@ export async function POST(req: NextRequest) {
 function jacobiEigen(A: number[][], n: number): { eigenvalues: number[]; eigenvectors: number[][] } {
   // Make a copy
   const a = A.map(row => [...row])
-  const v = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)))
+  const v: number[][] = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)))
 
   const maxIter = 100
   for (let iter = 0; iter < maxIter; iter++) {

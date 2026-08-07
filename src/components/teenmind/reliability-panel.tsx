@@ -11,7 +11,7 @@ import {
 import { Loader2, ShieldCheck, AlertCircle, CheckCircle2, Gauge } from 'lucide-react'
 
 type ItemStat = {
-  item: number
+  item: number | string
   mean: number
   sd: number
   itemTotalCorr: number
@@ -28,13 +28,22 @@ type ReliabilityData = {
   totalMean: number
   totalSD: number
   itemStats: ItemStat[]
+  caveat?: string
 }
 
+// NOTE: "bullying" dulu satu entri gabungan (8 item, salah — item itu berisi
+// GBS 1-4 + Climate 5-8, membuang item 9-12 dan mencampur dua instrumen
+// berbeda). Sekarang dipisah jadi "gbs" dan "climate" sesuai perbaikan
+// skoring; MOS-SSS juga diperbaiki dari "8 item" (salah) jadi 10 item yang
+// benar. Screen Time ditambahkan sebagai entri eksploratif (bukan skala baku).
 const INSTRUMENTS = [
   { value: 'cesdr', label: 'CESD-R (20 item)', color: '#fb7185' },
-  { value: 'mos', label: 'MOS-SSS (8 item)', color: '#fcd34d' },
-  { value: 'bullying', label: 'Bullying (8 item)', color: '#fdba74' },
+  { value: 'psqi', label: 'PSQI (5 item skala)', color: '#818cf8' },
+  { value: 'mos', label: 'MOS-SSS (10 item)', color: '#fcd34d' },
+  { value: 'gbs', label: 'Bullying / GBS (4 item)', color: '#fdba74' },
+  { value: 'climate', label: 'Climate School (8 item)', color: '#22d3ee' },
   { value: 'religiosity', label: 'Religiusitas (8 item)', color: '#86efac' },
+  { value: 'screentime', label: 'Screen Time (5 item, eksploratif)', color: '#a78bfa' },
 ]
 
 function getAlphaColor(alpha: number) {
@@ -129,6 +138,11 @@ export function ReliabilityPanel() {
           </div>
         ) : data ? (
           <div className="space-y-5">
+            {data.caveat && (
+              <div className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800 ring-1 ring-amber-200 dark:bg-amber-950/20 dark:text-amber-300">
+                <AlertCircle className="mr-1.5 inline h-3.5 w-3.5" /> {data.caveat}
+              </div>
+            )}
             {/* Alpha gauge + stats */}
             <div className="grid gap-4 sm:grid-cols-3">
               {/* Alpha gauge */}

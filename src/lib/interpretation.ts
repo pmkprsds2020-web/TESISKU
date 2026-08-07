@@ -5,10 +5,10 @@
 // Dipakai oleh API laporan responden (admin) dan halaman cetak/PDF, supaya
 // dashboard, laporan, dan PDF selalu menampilkan teks yang identik.
 
-import { scoreClimateSchool, type BullyingAnswers } from "./scoring"
+import { scoreClimateSchool, scoreScreenTime, type BullyingAnswers, type ScreenTimeAnswers } from "./scoring"
 
 export type InstrumentAnalysis = {
-  key: "cesdr" | "psqi" | "mos" | "gbs" | "climate" | "religiosity"
+  key: "cesdr" | "psqi" | "mos" | "gbs" | "climate" | "religiosity" | "screentime"
   label: string
   score: number | null
   maxScore: number
@@ -26,6 +26,7 @@ export type ScreeningInput = {
   gbs: number | null
   bullyingAnswers: BullyingAnswers | null
   religiosity: number | null
+  screenTimeAnswers: ScreenTimeAnswers | null
 }
 
 export function interpretCesdr(total: number | null): { category: string; interpretation: string; recommendation: string | null; warn: boolean } {
@@ -130,7 +131,7 @@ export function interpretReligiosity(total: number | null): { category: string; 
   }
 }
 
-/** Membangun panel "Analisis Hasil Skrining" untuk keenam instrumen. */
+/** Membangun panel "Analisis Hasil Skrining" untuk keenam instrumen skrining psikososial + Screen Time (deskriptif). */
 export function buildScreeningAnalysis(input: ScreeningInput): InstrumentAnalysis[] {
   const cesdr = interpretCesdr(input.cesdr)
   const psqi = interpretPsqi(input.psqi)
@@ -138,6 +139,7 @@ export function buildScreeningAnalysis(input: ScreeningInput): InstrumentAnalysi
   const gbs = interpretGBS(input.gbs)
   const climate = input.bullyingAnswers ? scoreClimateSchool(input.bullyingAnswers) : null
   const religiosity = interpretReligiosity(input.religiosity)
+  const screentime = input.screenTimeAnswers ? scoreScreenTime(input.screenTimeAnswers) : null
 
   return [
     { key: "cesdr", label: "CESD-R (Depresi)", score: input.cesdr, maxScore: 60, ...cesdr },
@@ -155,6 +157,16 @@ export function buildScreeningAnalysis(input: ScreeningInput): InstrumentAnalysi
       warn: climate ? climate.category !== "Lingkungan sekolah supportif" : false,
     },
     { key: "religiosity", label: "Religiusitas", score: input.religiosity, maxScore: 32, ...religiosity },
+    {
+      key: "screentime",
+      label: "Screen Time & Media Sosial (deskriptif, bukan skala baku)",
+      score: screentime?.total ?? null,
+      maxScore: 17,
+      category: screentime?.category ?? "Belum diisi",
+      interpretation: screentime?.interpretation ?? "Data belum tersedia.",
+      recommendation: screentime?.recommendation ?? null,
+      warn: screentime ? screentime.category !== "Dalam batas wajar" : false,
+    },
   ]
 }
 
@@ -208,10 +220,17 @@ export function buildConclusion(analysis: InstrumentAnalysis[]): string[] {
             : `Tingkat religiusitas tergolong baik berdasarkan skor religiusitas (${a.score}).`
         )
         break
+      case "screentime":
+        lines.push(
+          a.warn
+            ? `Data screen time (deskriptif, ${a.score}) menunjukkan ${a.category.toLowerCase()}.`
+            : `Data screen time (deskriptif, ${a.score}) berada dalam batas wajar.`
+        )
+        break
     }
   }
 
-  const anyRisk = analysis.some((a) => a.warn)
+  const anyRisk = analysis.some((a) => a.warn && a.key !== "screentime")
   if (anyRisk) {
     lines.push(
       "Temuan tersebut mengindikasikan perlunya perhatian terhadap kondisi psikologis responden serta penguatan dukungan dari keluarga dan sekolah."
@@ -283,7 +302,7 @@ export function buildClinicalNarrative(analysis: InstrumentAnalysis[]): string {
     middle = rest.length > 0 ? `${capFirst}, ${rest.join(", ")}. ` : `${capFirst}. `
   }
 
-  const anyRisk = analysis.some((a) => a.warn)
+  const anyRisk = analysis.some((a) => a.warn && a.key !== "screentime")
   const closing = anyRisk
     ? "Secara keseluruhan disarankan dilakukan asesmen lanjutan oleh guru BK atau tenaga kesehatan mental serta penguatan dukungan keluarga dan sekolah."
     : "Secara keseluruhan responden menunjukkan profil psikososial yang cukup baik, namun pemantauan berkala tetap disarankan sebagai bagian dari kesehatan mental preventif."
@@ -297,8 +316,9 @@ export function buildRecommendations(analysis: InstrumentAnalysis[]): string[] {
   for (const a of analysis) {
     if (a.recommendation) recs.add(a.recommendation)
   }
-  // Rekomendasi umum tambahan bila ada temuan berisiko.
-  if (analysis.some((a) => a.warn)) {
+  // Rekomendasi umum tambahan bila ada temuan berisiko pada instrumen klinis
+  // (Screen Time dikecualikan — bukan skala tervalidasi, lihat scoreScreenTime()).
+  if (analysis.some((a) => a.warn && a.key !== "screentime")) {
     recs.add("Rujukan ke psikolog/psikiater bila diperlukan sesuai penilaian klinis.")
   }
   return Array.from(recs)
