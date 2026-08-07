@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
-import { scorePsqi } from "@/lib/scoring"
+import { scorePsqi, scoreClimateSchool } from "@/lib/scoring"
+import { buildScreeningAnalysis, buildConclusion, buildClinicalNarrative, buildRecommendations } from "@/lib/interpretation"
 
 // GET /api/admin/respondent?code=SMP001001 — full detail incl. audit logs
 export async function GET(req: NextRequest) {
@@ -39,6 +40,24 @@ export async function GET(req: NextRequest) {
   // for display purposes. Does not overwrite the persisted totalScore.
   const psqiBreakdown = r.psqi ? scorePsqi(psqi) : null
 
+  // Climate School (item 5-12 of the `bullying` answers) is not stored as its
+  // own DB column — it's derived live from the raw answers, same pattern as
+  // psqiBreakdown above, so it's always in sync with the current scoring logic.
+  const climateSchool = r.bullying ? scoreClimateSchool(bullying) : null
+
+  const analysis = buildScreeningAnalysis({
+    cesdr: r.cesdr?.totalScore ?? null,
+    cesdrHighRisk: r.cesdr?.highRisk ?? false,
+    psqi: r.psqi?.totalScore ?? null,
+    mos: r.mos?.totalScore ?? null,
+    gbs: r.bullying?.victimScore ?? null,
+    bullyingAnswers: r.bullying ? bullying : null,
+    religiosity: r.religiosity?.totalScore ?? null,
+  })
+  const conclusion = buildConclusion(analysis)
+  const clinicalNarrative = buildClinicalNarrative(analysis)
+  const recommendations = buildRecommendations(analysis)
+
   return NextResponse.json({
     respondent: {
       code: r.code,
@@ -63,7 +82,8 @@ export async function GET(req: NextRequest) {
         cesdr: r.cesdr?.totalScore ?? null,
         psqi: r.psqi?.totalScore ?? null,
         mos: r.mos?.totalScore ?? null,
-        bullying: r.bullying?.victimScore ?? null,
+        bullying: r.bullying?.victimScore ?? null, // GBS (item 1-4) saja
+        climateSchool: climateSchool?.total ?? null,
         religiosity: r.religiosity?.totalScore ?? null,
       },
       psqiBreakdown: psqiBreakdown && {
@@ -71,6 +91,11 @@ export async function GET(req: NextRequest) {
         poorSleepQuality: psqiBreakdown.poorSleepQuality,
         limitations: psqiBreakdown.limitations,
       },
+      climateSchool,
+      analysis,
+      conclusion,
+      clinicalNarrative,
+      recommendations,
       cesdrItem18: cesdr["18"] ?? null,
       auditLogs: r.auditLogs.map((l) => ({
         action: l.action,

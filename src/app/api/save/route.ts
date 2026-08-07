@@ -177,7 +177,10 @@ export async function POST(req: NextRequest) {
     fireAndForget(syncMosAnswers(r.code, a, total))
     fireAndForget(syncAuditLog(r.code, "stage_complete", "mos"))
 
-  // ─── Bullying ─────────────────────────────────────────────────────
+  // ─── Bullying (GBS) ───────────────────────────────────────────────
+  // `victimScore` = skor GBS (item 1-4) saja. Climate School (item 5-12,
+  // disimpan dalam objek jawaban yang sama) dihitung terpisah saat laporan
+  // dibuka via scoreClimateSchool() — lihat src/lib/scoring.ts.
   } else if (stage === "bullying") {
     const a = answers as Record<number, number>
     const total = scoreBullying(a)
@@ -275,9 +278,7 @@ export async function PATCH(req: NextRequest) {
 
     } else if (stage === "cesdr") {
       const a = answers as Record<number, number>
-      let total = 0
-      for (const k in a) total += a[k] ?? 0
-      const highRisk = (a[18] ?? 0) >= 2
+      const { total, highRisk } = scoreCesdr(a)
       await db.cesdrAnswer.upsert({
         where: { respondentId: r.id },
         update: { answers: json, totalScore: total, highRisk },
@@ -306,8 +307,7 @@ export async function PATCH(req: NextRequest) {
 
     } else if (stage === "mos") {
       const a = answers as Record<number, number>
-      let total = 0
-      for (const k in a) total += a[k] ?? 0
+      const total = scoreMos(a)
       await db.mosAnswer.upsert({
         where: { respondentId: r.id },
         update: { answers: json, totalScore: total },
@@ -317,9 +317,11 @@ export async function PATCH(req: NextRequest) {
       fireAndForget(syncMosAnswers(r.code, a, total))
 
     } else if (stage === "bullying") {
+      // NOTE: `victimScore` merepresentasikan skor GBS (item 1-4) saja, bukan
+      // jumlah seluruh 12 item. Skor Climate School (item 5-12) dihitung
+      // terpisah saat laporan dibuka — lihat scoreClimateSchool() di scoring.ts.
       const a = answers as Record<number, number>
-      let total = 0
-      for (const k in a) total += a[k] ?? 0
+      const total = scoreBullying(a)
       await db.bullyingAnswer.upsert({
         where: { respondentId: r.id },
         update: { answers: json, victimScore: total },
@@ -330,8 +332,7 @@ export async function PATCH(req: NextRequest) {
 
     } else if (stage === "religiosity") {
       const a = answers as Record<number, number>
-      let total = 0
-      for (const k in a) total += a[k] ?? 0
+      const total = scoreReligiosity(a)
       await db.religiosityAnswer.upsert({
         where: { respondentId: r.id },
         update: { answers: json, totalScore: total },

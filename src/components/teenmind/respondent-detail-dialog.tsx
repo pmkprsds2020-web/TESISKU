@@ -38,7 +38,8 @@ type Detail = {
     cesdr: number | null
     psqi: number | null
     mos: number | null
-    bullying: number | null
+    bullying: number | null // GBS (item 1-4) saja
+    climateSchool: number | null
     religiosity: number | null
   }
   cesdrItem18: number | null
@@ -55,6 +56,27 @@ type Detail = {
     poorSleepQuality: boolean
     limitations: string[]
   } | null
+  climateSchool: {
+    total: number
+    maxScore: number
+    minScore: number
+    category: string
+    interpretation: string
+    recommendation: string | null
+  } | null
+  analysis: {
+    key: string
+    label: string
+    score: number | null
+    maxScore: number
+    category: string
+    interpretation: string
+    recommendation: string | null
+    warn: boolean
+  }[]
+  conclusion: string[]
+  clinicalNarrative: string
+  recommendations: string[]
   auditLogs: { action: string; detail: string | null; createdAt: string }[]
 }
 
@@ -69,6 +91,7 @@ const DEMO_LABELS: Record<string, string> = {
 const CESDR_LABELS = ['Tidak Pernah', 'Kadang', 'Cukup Sering', 'Hampir Setiap Hari']
 const MOS_LABELS = ['', 'Tidak Pernah', 'Jarang', 'Kadang', 'Sering', 'Selalu']
 const BL_LABELS = ['Tidak Pernah', 'Sekali', 'Beberapa kali', 'Sering kali']
+const CLIMATE_LABELS = ['', 'Sangat Setuju', 'Setuju', 'Tidak Setuju', 'Sangat Tidak Setuju']
 const REL_LABELS = ['', 'Tidak Pernah', 'Jarang', 'Kadang', 'Sering', 'Selalu']
 const ST_LABELS = ['Tidak Pernah', '< 1 jam', '1-2 jam', '3-4 jam', '> 4 jam']
 
@@ -111,12 +134,14 @@ export function RespondentDetailDialog({
     const demoRows = Object.entries(DEMO_LABELS).map(
       ([k, label]) => `<tr><td style="padding:4px 12px 4px 0;color:#666;font-size:12px">${label}</td><td style="padding:4px 0;font-size:12px;font-weight:600">${d.demographic[k] ?? '—'}</td></tr>`
     ).join('')
+
     const scoreRows = ([
       ['CESD-R (Depresi)', d.scores.cesdr, 60, d.scores.cesdr !== null && d.scores.cesdr >= 16],
       ['PSQI (Tidur)', d.scores.psqi, 21, d.scores.psqi !== null && d.scores.psqi > 5],
-      ['MOS-SSS (Dukungan)', d.scores.mos, 40, false],
-      ['Bullying', d.scores.bullying, 24, false],
-      ['Religiusitas', d.scores.religiosity, 40, false],
+      ['MOS-SSS (Dukungan)', d.scores.mos, 50, d.scores.mos !== null && d.scores.mos <= 25],
+      ['Bullying (GBS)', d.scores.bullying, 12, d.scores.bullying !== null && d.scores.bullying > 0],
+      ['Climate School (Iklim Sekolah)', d.scores.climateSchool, 32, d.scores.climateSchool !== null && d.scores.climateSchool > 16],
+      ['Religiusitas', d.scores.religiosity, 32, d.scores.religiosity !== null && d.scores.religiosity < 20],
     ] as const).map(([label, score, max, warn]) => `
       <tr>
         <td style="padding:6px 12px 6px 0;font-size:12px">${label}</td>
@@ -124,11 +149,34 @@ export function RespondentDetailDialog({
         <td style="padding:6px 0;font-size:11px;color:#888">${score !== null ? Math.round((score as number / (max as number)) * 100) + '%' : '—'}</td>
       </tr>
     `).join('')
+
+    const analysisRows = d.analysis.map((a) => `
+      <div class="analysis-item ${a.warn ? 'warn' : ''}">
+        <div class="analysis-head">
+          <span>${a.label}</span>
+          <span class="analysis-score">${a.score ?? '—'} / ${a.maxScore}</span>
+        </div>
+        <p class="analysis-cat">${a.category}</p>
+        <p class="analysis-text">${a.interpretation}</p>
+        ${a.recommendation ? `<p class="analysis-rec">→ ${a.recommendation}</p>` : ''}
+      </div>
+    `).join('')
+
+    const conclusionList = d.conclusion.length
+      ? `<ul>${d.conclusion.map((l) => `<li>${l}</li>`).join('')}</ul>`
+      : '<p style="font-size:12px;color:#94a3b8">Data belum lengkap.</p>'
+
+    const recommendationList = d.recommendations.length
+      ? `<ul>${d.recommendations.map((r) => `<li>${r}</li>`).join('')}</ul>`
+      : '<p style="font-size:12px;color:#94a3b8">Tidak ada rekomendasi khusus berdasarkan hasil skrining saat ini.</p>'
+
     w.document.write(`<!DOCTYPE html><html><head><title>Laporan ${d.code}</title>
       <style>
+        @page{size:A4 portrait;margin:16mm}
+        *{box-sizing:border-box}
         body{font-family:-apple-system,system-ui,sans-serif;max-width:720px;margin:0 auto;padding:32px;color:#0f172a}
         h1{font-size:20px;margin:0 0 4px}
-        h2{font-size:14px;margin:24px 0 8px;color:#64748b;text-transform:uppercase;letter-spacing:.05em}
+        h2{font-size:14px;margin:24px 0 8px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;break-after:avoid}
         .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #7dd3c0;padding-bottom:12px;margin-bottom:16px}
         .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600}
         .badge-risk{background:#fee2e2;color:#dc2626}
@@ -137,6 +185,21 @@ export function RespondentDetailDialog({
         table{width:100%;border-collapse:collapse}
         .scores{background:#f8fafc;border-radius:8px;padding:8px 16px;margin:8px 0}
         .warn-box{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;margin:12px 0;font-size:12px;color:#991b1b}
+        .section{break-inside:avoid-page}
+        .analysis-item{border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:11.5px;break-inside:avoid}
+        .analysis-item.warn{border-color:#fecaca;background:#fef2f2}
+        .analysis-head{display:flex;justify-content:space-between;font-weight:700;margin-bottom:2px}
+        .analysis-score{color:#0f172a}
+        .analysis-item.warn .analysis-score{color:#dc2626}
+        .analysis-cat{margin:0 0 2px;font-weight:600;color:#475569}
+        .analysis-text{margin:0 0 2px;color:#334155}
+        .analysis-rec{margin:4px 0 0;font-weight:600;color:#b91c1c}
+        .box{border-radius:8px;padding:12px 14px;margin:8px 0;font-size:12px;line-height:1.6}
+        .box-conclusion{background:#f0f9ff;border:1px solid #bae6fd}
+        .box-clinical{background:#f5f3ff;border:1px solid #ddd6fe}
+        .box-rec{background:#f0fdf4;border:1px solid #bbf7d0}
+        ul{margin:4px 0 0;padding-left:18px}
+        li{margin-bottom:3px}
         .footer{margin-top:32px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8;text-align:center}
         @media print{body{padding:16mm}}
       </style>
@@ -146,31 +209,62 @@ export function RespondentDetailDialog({
           <h1>TeenMind Research — Laporan Responden</h1>
           <p style="font-size:13px;color:#64748b;margin:2px 0">Kode: <strong style="font-family:monospace">${d.code}</strong> · ${d.school || 'Sekolah tidak diketahui'}</p>
         </div>
-        <div>
+        <div style="text-align:right">
           ${d.highRisk ? '<span class="badge badge-risk">⚠ HIGH RISK</span>' : ''}
           <span class="badge ${d.status === 'completed' ? 'badge-done' : 'badge-prog'}">${d.status === 'completed' ? '✓ Selesai' : '⏳ Proses'}</span>
         </div>
       </div>
       <p style="font-size:11px;color:#94a3b8;margin:0 0 16px">
-        Dibuat: ${new Date().toLocaleString('id-ID')} ·
-        Mulai: ${new Date(d.startedAt).toLocaleString('id-ID')}
-        ${d.completedAt ? ` · Selesai: ${new Date(d.completedAt).toLocaleString('id-ID')}` : ''}
+        Kode Responden: <strong>${d.code}</strong> ·
+        Tanggal Pemeriksaan: ${new Date(d.startedAt).toLocaleDateString('id-ID', { dateStyle: 'long' })}
+        ${d.completedAt ? ` · Tanggal Selesai: ${new Date(d.completedAt).toLocaleDateString('id-ID', { dateStyle: 'long' })}` : ' · Belum selesai'}
+        · Dokumen dibuat: ${new Date().toLocaleString('id-ID')}
       </p>
       ${d.highRisk ? `<div class="warn-box">
         <strong>⚠ PROSEDUR ETIK:</strong> Responden menandai item CESD-R #18 (menyakiti diri) dengan skor
         <strong>${d.cesdrItem18}</strong> (${CESDR_LABELS[d.cesdrItem18 ?? 0]}). Hubungi guru BK/konselor sekolah dalam 1×24 jam.
       </div>` : ''}
-      <h2>Skor Instrumen</h2>
-      <div class="scores">
-        <table>${scoreRows}</table>
+
+      <div class="section">
+        <h2>1–2. Identitas &amp; Data Demografi</h2>
+        <table>${demoRows}</table>
       </div>
-      <h2>Data Demografi</h2>
-      <table>${demoRows}</table>
-      <h2>Catatan</h2>
-      <p style="font-size:11px;color:#64748b;line-height:1.5">
-        Laporan ini bersifat rahasia dan hanya untuk keperluan penelitian & tindak lanjut etik.
-        CESD-R skor ≥16 menandakan gejala depresi bermakna. PSQI skor &gt;5 menandakan kualitas tidur buruk.
-      </p>
+
+      <div class="section">
+        <h2>3. Skor Seluruh Instrumen</h2>
+        <div class="scores"><table>${scoreRows}</table></div>
+      </div>
+
+      <div class="section">
+        <h2>5. Analisis Hasil Skrining</h2>
+        ${analysisRows}
+      </div>
+
+      <div class="section">
+        <h2>6. Kesimpulan Skrining</h2>
+        <div class="box box-conclusion">${conclusionList}</div>
+      </div>
+
+      <div class="section">
+        <h2>7. Interpretasi Klinis</h2>
+        <div class="box box-clinical"><p style="margin:0">${d.clinicalNarrative}</p></div>
+      </div>
+
+      <div class="section">
+        <h2>8. Rekomendasi Tindak Lanjut</h2>
+        <div class="box box-rec">${recommendationList}</div>
+      </div>
+
+      <div class="section">
+        <h2>Catatan Penelitian</h2>
+        <p style="font-size:11px;color:#64748b;line-height:1.5">
+          Laporan ini bersifat rahasia dan hanya untuk keperluan penelitian &amp; tindak lanjut etik.
+          CESD-R skor ≥16 menandakan gejala depresi bermakna. PSQI skor &gt;5 menandakan kualitas tidur buruk.
+          MOS-SSS skor &gt;25 menandakan dukungan sosial tinggi. Climate School memakai kuesioner adaptasi
+          8-item (bukan versi resmi 12-item); cutoff diskalakan secara proporsional — lihat lampiran metode.
+        </p>
+      </div>
+
       <div class="footer">TeenMind Research · Penelitian Tesis Faktor Biopsikososial Depresi Remaja SMP · Dokumen rahasia</div>
     </body></html>`)
     w.document.close()
@@ -232,15 +326,16 @@ export function RespondentDetailDialog({
           ) : detail ? (
             <div className="px-6 py-4">
               {/* Score summary */}
-              <div className="mb-5 grid grid-cols-5 gap-2">
+              <div className="mb-5 grid grid-cols-3 gap-2 sm:grid-cols-6">
                 {([
                   ['CESD-R', detail.scores.cesdr, detail.scores.cesdr !== null && detail.scores.cesdr >= 16, 'from-rose-400 to-pink-400'],
                   ['PSQI', detail.scores.psqi, detail.scores.psqi !== null && detail.scores.psqi > 5, 'from-indigo-400 to-violet-400'],
-                  ['MOS', detail.scores.mos, false, 'from-amber-400 to-orange-400'],
-                  ['Bully', detail.scores.bullying, detail.scores.bullying !== null && detail.scores.bullying >= 8, 'from-orange-400 to-red-400'],
-                  ['Relig', detail.scores.religiosity, false, 'from-teal-400 to-emerald-400'],
+                  ['MOS', detail.scores.mos, detail.scores.mos !== null && detail.scores.mos <= 25, 'from-amber-400 to-orange-400'],
+                  ['GBS', detail.scores.bullying, detail.scores.bullying !== null && detail.scores.bullying > 0, 'from-orange-400 to-red-400'],
+                  ['Climate', detail.scores.climateSchool, detail.scores.climateSchool !== null && detail.scores.climateSchool > 16, 'from-cyan-400 to-sky-500'],
+                  ['Relig', detail.scores.religiosity, detail.scores.religiosity !== null && detail.scores.religiosity < 20, 'from-teal-400 to-emerald-400'],
                 ] as const).map(([label, score, warn, color]) => (
-                  <div key={label} className={`rounded-xl bg-gradient-to-br ${color} p-2.5 text-center text-white shadow-sm`}>
+                  <div key={label} className={`rounded-xl bg-gradient-to-br ${color} p-2.5 text-center text-white shadow-sm ${warn ? 'ring-2 ring-rose-500 ring-offset-1' : ''}`}>
                     <p className="text-[10px] font-semibold opacity-90">{label}</p>
                     <p className="text-xl font-bold">{score ?? '—'}</p>
                   </div>
@@ -259,9 +354,10 @@ export function RespondentDetailDialog({
                       <RadarChart data={[
                         { name: 'Depresi', value: (detail.scores.cesdr ?? 0) / 60 * 100, raw: detail.scores.cesdr },
                         { name: 'Gangguan Tidur', value: (detail.scores.psqi ?? 0) / 21 * 100, raw: detail.scores.psqi },
-                        { name: 'Dukungan Sosial', value: (detail.scores.mos ?? 0) / 40 * 100, raw: detail.scores.mos },
-                        { name: 'Bullying', value: (detail.scores.bullying ?? 0) / 24 * 100, raw: detail.scores.bullying },
-                        { name: 'Religiusitas', value: (detail.scores.religiosity ?? 0) / 40 * 100, raw: detail.scores.religiosity },
+                        { name: 'Dukungan Sosial', value: (detail.scores.mos ?? 0) / 50 * 100, raw: detail.scores.mos },
+                        { name: 'Bullying (GBS)', value: (detail.scores.bullying ?? 0) / 12 * 100, raw: detail.scores.bullying },
+                        { name: 'Iklim Sekolah', value: (detail.scores.climateSchool ?? 0) / 32 * 100, raw: detail.scores.climateSchool },
+                        { name: 'Religiusitas', value: (detail.scores.religiosity ?? 0) / 32 * 100, raw: detail.scores.religiosity },
                       ]} margin={{ top: 8, right: 24, left: 24, bottom: 8 }}>
                         <PolarGrid stroke="oklch(0.8 0.02 220)" />
                         <PolarAngleAxis dataKey="name" tick={{ fontSize: 10, fill: 'oklch(0.5 0.02 250)' }} />
@@ -288,8 +384,11 @@ export function RespondentDetailDialog({
                 </div>
               )}
 
-              <Tabs defaultValue="demo" className="w-full">
+              <Tabs defaultValue="analysis" className="w-full">
                 <TabsList className="mb-3 flex h-auto w-full flex-wrap gap-1 rounded-xl bg-muted/50 p-1">
+                  <TabsTrigger value="analysis" className="rounded-lg text-xs data-[state=active]:bg-white dark:data-[state=active]:bg-white/10">
+                    Analisis
+                  </TabsTrigger>
                   <TabsTrigger value="demo" className="rounded-lg text-xs data-[state=active]:bg-white dark:data-[state=active]:bg-white/10">
                     <FileText className="mr-1 h-3.5 w-3.5" /> Demografi
                   </TabsTrigger>
@@ -300,6 +399,56 @@ export function RespondentDetailDialog({
                     <History className="mr-1 h-3.5 w-3.5" /> Audit ({detail.auditLogs.length})
                   </TabsTrigger>
                 </TabsList>
+
+                {/* Analisis Hasil Skrining, Kesimpulan, Interpretasi Klinis, Rekomendasi */}
+                <TabsContent value="analysis" className="mt-0 space-y-4">
+                  <div>
+                    <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">Analisis Hasil Skrining</h4>
+                    <div className="space-y-2">
+                      {detail.analysis.map((a) => (
+                        <div
+                          key={a.key}
+                          className={`rounded-xl p-3 text-xs ${a.warn ? 'bg-rose-50 ring-1 ring-rose-200 dark:bg-rose-950/20' : 'bg-muted/30'}`}
+                        >
+                          <div className="mb-1 flex items-center justify-between">
+                            <span className="font-semibold text-foreground">{a.label}</span>
+                            <span className={`font-bold ${a.warn ? 'text-rose-600' : 'text-foreground'}`}>
+                              {a.score ?? '—'} / {a.maxScore}
+                            </span>
+                          </div>
+                          <p className="text-[11px] font-medium text-muted-foreground">{a.category}</p>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">{a.interpretation}</p>
+                          {a.recommendation && (
+                            <p className="mt-1 text-[11px] font-medium text-rose-600 dark:text-rose-400">→ {a.recommendation}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {detail.conclusion.length > 0 && (
+                    <div className="rounded-xl border border-sky-100 bg-sky-50/50 p-3 dark:bg-sky-950/20">
+                      <h4 className="mb-1.5 text-xs font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300">Kesimpulan Skrining</h4>
+                      <ul className="list-disc space-y-1 pl-4 text-[12px] text-foreground/90">
+                        {detail.conclusion.map((line, i) => <li key={i}>{line}</li>)}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="rounded-xl border border-violet-100 bg-violet-50/50 p-3 dark:bg-violet-950/20">
+                    <h4 className="mb-1.5 text-xs font-bold uppercase tracking-wide text-violet-700 dark:text-violet-300">Interpretasi Klinis</h4>
+                    <p className="text-[12px] leading-relaxed text-foreground/90">{detail.clinicalNarrative}</p>
+                  </div>
+
+                  {detail.recommendations.length > 0 && (
+                    <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 dark:bg-emerald-950/20">
+                      <h4 className="mb-1.5 text-xs font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Rekomendasi Tindak Lanjut</h4>
+                      <ul className="list-disc space-y-1 pl-4 text-[12px] text-foreground/90">
+                        {detail.recommendations.map((r, i) => <li key={i}>{r}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </TabsContent>
 
                 {/* Demographics */}
                 <TabsContent value="demo" className="mt-0">
@@ -363,9 +512,23 @@ export function RespondentDetailDialog({
                   <AnswerSection title="MOS-SSS (Dukungan)" items={
                     Object.entries(detail.answers.mos).map(([k, v]) => [`Item ${k}`, MOS_LABELS[v] ?? v, false])
                   } />
-                  <AnswerSection title="Bullying" items={
-                    Object.entries(detail.answers.bullying).map(([k, v]) => [`Item ${k}`, BL_LABELS[v] ?? v, false])
+                  <AnswerSection title="GBS — Pengalaman Perundungan (item 1-4)" items={
+                    Object.entries(detail.answers.bullying)
+                      .filter(([k]) => Number(k) <= 4)
+                      .map(([k, v]) => [`Item ${k}`, BL_LABELS[v] ?? v, Number(v) > 0])
                   } />
+                  <AnswerSection title="Climate School — Iklim Sekolah (item 5-12)" items={
+                    Object.entries(detail.answers.bullying)
+                      .filter(([k]) => Number(k) >= 5)
+                      .map(([k, v]) => [`Item ${k}`, CLIMATE_LABELS[Number(v)] ?? v, false])
+                  } />
+                  {detail.climateSchool && (
+                    <div className="rounded-xl border border-cyan-100 bg-cyan-50/50 p-3 dark:bg-cyan-950/20">
+                      <p className="text-[11px] text-muted-foreground">
+                        Skor Climate School: <strong>{detail.climateSchool.total} / {detail.climateSchool.maxScore}</strong> — {detail.climateSchool.category}
+                      </p>
+                    </div>
+                  )}
                   <AnswerSection title="Religiusitas" items={
                     Object.entries(detail.answers.religiosity).map(([k, v]) => [`Item ${k}`, REL_LABELS[v] ?? v, false])
                   } />

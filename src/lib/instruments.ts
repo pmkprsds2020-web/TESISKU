@@ -391,12 +391,23 @@ export const CLIMATE_ITEMS: { id: number; text: string }[] = [
   { id: 12, text: "Saya merasa senang dan nyaman berada di lingkungan sekolah." },
 ]
 
+// Skala resmi pedoman instrumen: 1 = Sangat Setuju ... 4 = Sangat Tidak Setuju.
+// (Sebelumnya skala ini terbalik — 1 = Sangat Tidak Setuju ... 4 = Sangat Setuju.
+// Diperbaiki agar sesuai pedoman instrumen; lihat scoreClimateSchool() di scoring.ts
+// untuk cara skor ini diagregasi, termasuk reverse-scoring item bermuatan negatif.)
 export const CLIMATE_OPTIONS: LikertOption[] = [
-  { value: 1, label: "Sangat Tidak Setuju", emoji: "😞", color: "from-rose-100 to-rose-50 border-rose-300 data-[selected=true]:border-rose-500 data-[selected=true]:bg-rose-100" },
-  { value: 2, label: "Tidak Setuju", emoji: "🙁", color: "from-amber-100 to-amber-50 border-amber-300 data-[selected=true]:border-amber-500 data-[selected=true]:bg-amber-100" },
-  { value: 3, label: "Setuju", emoji: "🙂", color: "from-sky-100 to-sky-50 border-sky-300 data-[selected=true]:border-sky-500 data-[selected=true]:bg-sky-100" },
-  { value: 4, label: "Sangat Setuju", emoji: "😁", color: "from-emerald-100 to-emerald-50 border-emerald-300 data-[selected=true]:border-emerald-500 data-[selected=true]:bg-emerald-100" },
+  { value: 1, label: "Sangat Setuju", emoji: "😁", color: "from-emerald-100 to-emerald-50 border-emerald-300 data-[selected=true]:border-emerald-500 data-[selected=true]:bg-emerald-100" },
+  { value: 2, label: "Setuju", emoji: "🙂", color: "from-sky-100 to-sky-50 border-sky-300 data-[selected=true]:border-sky-500 data-[selected=true]:bg-sky-100" },
+  { value: 3, label: "Tidak Setuju", emoji: "🙁", color: "from-amber-100 to-amber-50 border-amber-300 data-[selected=true]:border-amber-500 data-[selected=true]:bg-amber-100" },
+  { value: 4, label: "Sangat Tidak Setuju", emoji: "😞", color: "from-rose-100 to-rose-50 border-rose-300 data-[selected=true]:border-rose-500 data-[selected=true]:bg-rose-100" },
 ]
+
+// Item Climate School yang bermuatan negatif (mis. "saya merasa stres", "saya
+// takut ke sekolah"). Setuju pada item ini berarti lingkungan KURANG
+// supportif, jadi arah skornya dibalik (reverse-scored) saat agregasi total
+// supaya konsisten dengan item positif lainnya: semakin tinggi skor total =
+// semakin kurang supportif. Lihat scoreClimateSchool() di scoring.ts.
+export const CLIMATE_REVERSE_ITEM_IDS: number[] = [9, 10]
 
 // Combined for the BullyingScreen (backward compat)
 export const BULLYING_ITEMS = [...GBS_ITEMS, ...CLIMATE_ITEMS.map(c => ({ id: c.id, text: c.text, icon: "🏫" }))]

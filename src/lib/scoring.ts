@@ -4,6 +4,7 @@
 import {
   CESDR_HIGH_RISK_ITEM,
   CESDR_HIGH_RISK_THRESHOLD,
+  CLIMATE_REVERSE_ITEM_IDS,
 } from "./instruments"
 
 export type CesdrAnswers = Record<number, number>
@@ -152,11 +153,79 @@ export function scoreMos(answers: MosAnswers): number {
 }
 
 export type BullyingAnswers = Record<number, number>
-/** Skor victimisasi bullying = jumlah GBS items (1-4) + School Climate items (5-12). */
+
+/**
+ * Skor victimisasi bullying (GBS / Gatehouse Bullying Scale) = jumlah item 1-4
+ * saja (range 0-12). Item 5-12 (School Climate) BUKAN bagian dari skor
+ * bullying — item tersebut adalah instrumen terpisah, lihat scoreClimateSchool().
+ *
+ * CATATAN PERBAIKAN: sebelumnya fungsi ini menjumlahkan seluruh item 1-12
+ * (GBS + Climate tercampur), padahal field database menamainya `victimScore`.
+ * Ini adalah bug pembalikan/pencampuran instrumen yang sudah diperbaiki di
+ * sini — GBS dan Climate School sekarang dihitung oleh fungsi terpisah,
+ * masing-masing dengan pedoman interpretasinya sendiri, meski jawabannya
+ * tetap disimpan dalam satu objek `bullying` (item 1-4 = GBS, 5-12 = Climate).
+ */
 export function scoreBullying(answers: BullyingAnswers): number {
   let total = 0
-  for (let i = 1; i <= 12; i++) total += answers[i] ?? 0
+  for (let i = 1; i <= 4; i++) total += answers[i] ?? 0
   return total
+}
+
+export type ClimateSchoolResult = {
+  total: number
+  maxScore: number
+  minScore: number
+  category: string
+  interpretation: string
+  recommendation: string | null
+}
+
+/**
+ * Skor Climate School (Iklim Sekolah) = item 5-12 pada objek jawaban
+ * `bullying` (8 item, skala 1-4 sesuai CLIMATE_OPTIONS: 1 = Sangat Setuju ...
+ * 4 = Sangat Tidak Setuju). Item bernomor di CLIMATE_REVERSE_ITEM_IDS
+ * (bermuatan negatif, mis. "saya merasa stres di sekolah") dibalik
+ * (reverse-scored: 5 - nilai) sebelum dijumlah, supaya arah skor konsisten:
+ * semakin tinggi skor total = semakin kurang supportif lingkungan sekolahnya.
+ *
+ * ADAPTASI INSTRUMEN: pedoman resmi yang dipakai sebagai acuan interpretasi
+ * dirancang untuk 12 item (range 12-48, cutoff 24). Kuesioner pada aplikasi
+ * ini memakai versi adaptasi 8-item (range 8-32). Cutoff diskalakan secara
+ * proporsional dari pedoman resmi (24 berada di persentil ~33% dari rentang
+ * 12-48), sehingga pada rentang 8-32 cutoff yang setara adalah 16. Batasan
+ * ini perlu dicantumkan di bab metode tesis, mengikuti pola dokumentasi
+ * keterbatasan yang sama seperti pada scorePsqi().
+ */
+export function scoreClimateSchool(answers: BullyingAnswers): ClimateSchoolResult {
+  let total = 0
+  for (let i = 5; i <= 12; i++) {
+    const raw = answers[i] ?? 0
+    total += CLIMATE_REVERSE_ITEM_IDS.includes(i) ? (raw === 0 ? 0 : 5 - raw) : raw
+  }
+
+  const maxScore = 32
+  const minScore = 8
+  const cutoff = 16 // lihat catatan adaptasi di atas
+
+  if (total <= cutoff) {
+    return {
+      total,
+      maxScore,
+      minScore,
+      category: "Lingkungan sekolah supportif",
+      interpretation: "Responden menilai lingkungan sekolah masih memiliki dukungan sosial dan iklim sekolah yang baik.",
+      recommendation: null,
+    }
+  }
+  return {
+    total,
+    maxScore,
+    minScore,
+    category: "Lingkungan sekolah kurang supportif",
+    interpretation: "Skor menunjukkan adanya indikasi lingkungan sekolah yang kurang mendukung dan berpotensi berkaitan dengan risiko bullying.",
+    recommendation: "Disarankan dilakukan evaluasi lingkungan sekolah, penguatan peran guru BK, serta peningkatan program pencegahan bullying.",
+  }
 }
 
 export type ReligiosityAnswers = Record<number, number>
