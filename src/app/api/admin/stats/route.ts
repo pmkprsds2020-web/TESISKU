@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { db, withDbRetry } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
+import { climateScoreFromBullyingRelation } from "@/lib/scoring"
 
 // GET /api/admin/stats
 export async function GET() {
@@ -108,6 +109,7 @@ async function buildStats(projectId: string) {
   const psqiScores: number[] = []
   const mosScores: number[] = []
   const bullyingScores: number[] = []
+  const climateScores: number[] = []
   const religiosityScores: number[] = []
 
   for (const r of allWithScores) {
@@ -121,7 +123,9 @@ async function buildStats(projectId: string) {
     if (r.cesdr) cesdrScores.push(r.cesdr.totalScore)
     if (r.psqi) psqiScores.push(r.psqi.totalScore)
     if (r.mos) mosScores.push(r.mos.totalScore)
-    if (r.bullying) bullyingScores.push(r.bullying.victimScore)
+    if (r.bullying) bullyingScores.push(r.bullying.victimScore) // GBS (item 1-4)
+    const climateVal = climateScoreFromBullyingRelation(r.bullying) // Climate School (item 5-12)
+    if (climateVal !== null) climateScores.push(climateVal)
     if (r.religiosity) religiosityScores.push(r.religiosity.totalScore)
   }
 
@@ -173,6 +177,7 @@ async function buildStats(projectId: string) {
   const psqiArr: (number | null)[] = allWithScores.map((r) => r.psqi?.totalScore ?? null)
   const mosArr: (number | null)[] = allWithScores.map((r) => r.mos?.totalScore ?? null)
   const bullyingArr: (number | null)[] = allWithScores.map((r) => r.bullying?.victimScore ?? null)
+  const climateArr: (number | null)[] = allWithScores.map((r) => climateScoreFromBullyingRelation(r.bullying))
   const religArr: (number | null)[] = allWithScores.map((r) => r.religiosity?.totalScore ?? null)
 
   // PERF: each pair (e.g. cesdr×psqi) was being recomputed twice — once for
@@ -182,13 +187,18 @@ async function buildStats(projectId: string) {
   const cesdr_psqi = corr(cesdrArr, psqiArr)
   const cesdr_mos = corr(cesdrArr, mosArr)
   const cesdr_bullying = corr(cesdrArr, bullyingArr)
+  const cesdr_climate = corr(cesdrArr, climateArr)
   const cesdr_religiosity = corr(cesdrArr, religArr)
   const psqi_mos = corr(psqiArr, mosArr)
   const psqi_bullying = corr(psqiArr, bullyingArr)
+  const psqi_climate = corr(psqiArr, climateArr)
   const psqi_religiosity = corr(psqiArr, religArr)
   const mos_bullying = corr(mosArr, bullyingArr)
+  const mos_climate = corr(mosArr, climateArr)
   const mos_religiosity = corr(mosArr, religArr)
+  const bullying_climate = corr(bullyingArr, climateArr)
   const bullying_religiosity = corr(bullyingArr, religArr)
+  const climate_religiosity = corr(climateArr, religArr)
 
   return NextResponse.json({
     overview: {
@@ -213,21 +223,24 @@ async function buildStats(projectId: string) {
       psqi: stats(psqiScores),
       mos: stats(mosScores),
       bullying: stats(bullyingScores),
+      climate: stats(climateScores),
       religiosity: stats(religiosityScores),
     },
     correlations: {
       cesdr_psqi,
       cesdr_mos,
       cesdr_bullying,
+      cesdr_climate,
       cesdr_religiosity,
       cesdr_screentime: 0,
       // Full matrix
       matrix: {
-        cesdr: { cesdr: 1, psqi: cesdr_psqi, mos: cesdr_mos, bullying: cesdr_bullying, religiosity: cesdr_religiosity },
-        psqi: { cesdr: cesdr_psqi, psqi: 1, mos: psqi_mos, bullying: psqi_bullying, religiosity: psqi_religiosity },
-        mos: { cesdr: cesdr_mos, psqi: psqi_mos, mos: 1, bullying: mos_bullying, religiosity: mos_religiosity },
-        bullying: { cesdr: cesdr_bullying, psqi: psqi_bullying, mos: mos_bullying, bullying: 1, religiosity: bullying_religiosity },
-        religiosity: { cesdr: cesdr_religiosity, psqi: psqi_religiosity, mos: mos_religiosity, bullying: bullying_religiosity, religiosity: 1 },
+        cesdr: { cesdr: 1, psqi: cesdr_psqi, mos: cesdr_mos, bullying: cesdr_bullying, climate: cesdr_climate, religiosity: cesdr_religiosity },
+        psqi: { cesdr: cesdr_psqi, psqi: 1, mos: psqi_mos, bullying: psqi_bullying, climate: psqi_climate, religiosity: psqi_religiosity },
+        mos: { cesdr: cesdr_mos, psqi: psqi_mos, mos: 1, bullying: mos_bullying, climate: mos_climate, religiosity: mos_religiosity },
+        bullying: { cesdr: cesdr_bullying, psqi: psqi_bullying, mos: mos_bullying, bullying: 1, climate: bullying_climate, religiosity: bullying_religiosity },
+        climate: { cesdr: cesdr_climate, psqi: psqi_climate, mos: mos_climate, bullying: bullying_climate, climate: 1, religiosity: climate_religiosity },
+        religiosity: { cesdr: cesdr_religiosity, psqi: psqi_religiosity, mos: mos_religiosity, bullying: bullying_religiosity, climate: climate_religiosity, religiosity: 1 },
       },
     },
     n: allWithScores.length,

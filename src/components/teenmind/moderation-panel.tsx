@@ -54,7 +54,8 @@ type ModerationData = {
 }
 
 const VAR_OPTIONS = [
-  { value: 'bullying', label: 'Bullying' },
+  { value: 'bullying', label: 'Bullying (GBS)' },
+  { value: 'climate', label: 'Climate School' },
   { value: 'psqi', label: 'PSQI (Tidur)' },
   { value: 'mos', label: 'MOS (Dukungan)' },
   { value: 'religiosity', label: 'Religiusitas' },

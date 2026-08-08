@@ -5,12 +5,25 @@ Reads JSON data from stdin, writes a real .sav file to stdout.
 
 Usage:
     echo '{"respondents":[...]}' | python3 scripts/export_sav.py > output.sav
+
+NOTE (perbaikan): versi lama script ini memakai loop range() hardcode
+(mos 1-8, bl 1-8, dst.) yang tidak sinkron dengan jumlah item instrumen
+sebenarnya (MOS-SSS 10 item, GBS+Climate School 12 item tercampur), dan
+daftar field Screen Time yang sama sekali tidak cocok dengan kuesioner
+asli. Sekarang skrip ini membangun kolom secara DINAMIS dari key yang
+benar-benar dikirim oleh Node (lihat src/app/api/admin/export-sav/route.ts),
+alih-alih menduga ulang jumlah item — jadi penambahan/pengubahan item
+instrumen di masa depan tidak lagi butuh perbaikan manual berpasangan di
+Node maupun di sini.
 """
 import sys
 import json
-import io
 import warnings
 warnings.filterwarnings("ignore")
+
+# Kolom yang tidak ikut jadi kolom dinamis (ditangani terpisah di atas).
+_HANDLED_TOP_LEVEL = {"code", "school", "status", "highRisk", "consentGiven", "demographic", "scores"}
+
 
 def main():
     try:
@@ -20,7 +33,6 @@ def main():
         sys.stderr.write(f"Missing package: {e}\n")
         sys.exit(1)
 
-    # Read JSON from stdin
     raw = sys.stdin.read()
     if not raw.strip():
         sys.stderr.write("No input data\n")
@@ -37,61 +49,64 @@ def main():
         sys.stderr.write("No respondents\n")
         sys.exit(1)
 
-    # Build DataFrame
+    # Build DataFrame. Column set = union of all dynamic keys across all
+    # respondents (a field missing for one respondent still gets a column,
+    # filled with None), in first-seen order for stable column ordering.
     rows = []
+    dynamic_keys = []
+    seen = set()
     for r in respondents:
-        row = {}
+        for k in r.keys():
+            if k in _HANDLED_TOP_LEVEL:
+                continue
+            if k not in seen:
+                seen.add(k)
+                dynamic_keys.append(k)
+
+    for r in respondents:
         demo = r.get("demographic", {})
         scores = r.get("scores", {})
-        # Basic
-        row["code"] = r.get("code", "")
-        row["school"] = r.get("school", "")
-        row["status"] = r.get("status", "")
-        row["highRisk"] = 1 if r.get("highRisk") else 0
-        row["consentGiven"] = 1 if r.get("consentGiven") else 0
-        # Demographics
-        row["initial"] = demo.get("initial", "")
-        row["age"] = _to_num(demo.get("age"))
-        row["gender"] = demo.get("gender", "")
-        row["classGrade"] = demo.get("classGrade", "")
-        row["residence"] = demo.get("residence", "")
-        row["parentIncome"] = demo.get("parentIncome", "")
-        row["fatherEdu"] = demo.get("fatherEducation", "")
-        row["motherEdu"] = demo.get("motherEducation", "")
-        row["familyComp"] = demo.get("familyComposition", "")
-        row["chronicIll"] = demo.get("chronicIllness", "")
-        row["mentalHist"] = demo.get("mentalHistory", "")
-        # CESD-R items
-        for i in range(1, 21):
-            row[f"cesdr_{i}"] = _to_num(r.get(f"cesdr_{i}"))
-        row["cesdr_total"] = _to_num(scores.get("cesdr"))
-        # PSQI
-        row["psqi_bedtime"] = r.get("psqi_bedtime", "")
-        row["psqi_waketime"] = r.get("psqi_waketime", "")
-        row["psqi_latency"] = _to_num(r.get("psqi_sleepLatency"))
-        row["psqi_actualSleep"] = _to_num(r.get("psqi_actualSleep"))
-        row["psqi_quality"] = _to_num(r.get("psqi_sleepQuality"))
-        row["psqi_total"] = _to_num(scores.get("psqi"))
-        # Screen time
-        for k in ["hp", "laptop", "tablet", "tiktok", "instagram", "youtube", "whatsapp", "beforeSleep", "feelAfter"]:
-            row[f"st_{k}"] = _to_num(r.get(f"st_{k}"))
-        # MOS
-        for i in range(1, 9):
-            row[f"mos_{i}"] = _to_num(r.get(f"mos_{i}"))
-        row["mos_total"] = _to_num(scores.get("mos"))
-        # Bullying
-        for i in range(1, 9):
-            row[f"bl_{i}"] = _to_num(r.get(f"bl_{i}"))
-        row["bullying_total"] = _to_num(scores.get("bullying"))
-        # Religiosity
-        for i in range(1, 9):
-            row[f"rel_{i}"] = _to_num(r.get(f"rel_{i}"))
-        row["relig_total"] = _to_num(scores.get("religiosity"))
+        row = {
+            "code": r.get("code", ""),
+            "school": r.get("school", ""),
+            "status": r.get("status", ""),
+            "highRisk": 1 if r.get("highRisk") else 0,
+            "consentGiven": 1 if r.get("consentGiven") else 0,
+            "initial": demo.get("initial", ""),
+            "age": _to_num(demo.get("age")),
+            "gender": demo.get("gender", ""),
+            "classGrade": demo.get("classGrade", ""),
+            "residence": demo.get("residence", ""),
+            "parentIncome": demo.get("parentIncome", ""),
+            "fatherEdu": demo.get("fatherEducation", ""),
+            "motherEdu": demo.get("motherEducation", ""),
+            "familyComp": demo.get("familyComposition", ""),
+            "chronicIll": demo.get("chronicIllness", ""),
+            "mentalHist": demo.get("mentalHistory", ""),
+            "cesdr_total": _to_num(scores.get("cesdr")),
+            "psqi_total": _to_num(scores.get("psqi")),
+            "mos_total": _to_num(scores.get("mos")),
+            "gbs_total": _to_num(scores.get("gbs")),
+            "climate_total": _to_num(scores.get("climate")),
+            "relig_total": _to_num(scores.get("religiosity")),
+            "screentime_total": _to_num(scores.get("screentime")),
+        }
+        # Dynamic per-item columns (cesdr_*, psqi_*, st_*, mos_*, gbs_*, climate_*, rel_*)
+        for k in dynamic_keys:
+            v = r.get(k, "")
+            # Time-of-day fields (psqi_bedtime/psqi_waketime) and text/categoricals stay as-is;
+            # everything else attempts numeric coercion.
+            if k in ("psqi_bedtime", "psqi_waketime"):
+                row[k] = v if v is not None else ""
+            else:
+                row[k] = _to_num(v) if _to_num(v) is not None else (v if v not in (None, "") else None)
         rows.append(row)
 
     df = pd.DataFrame(rows)
 
-    # Define variable labels for SPSS
+    # Define variable labels for SPSS. Any column not listed here falls back
+    # to its own key as the label (still functional in SPSS, just less
+    # descriptive) rather than silently failing.
     labels = {
         "code": "Kode Penelitian",
         "school": "Sekolah",
@@ -111,16 +126,36 @@ def main():
         "mentalHist": "Riwayat Gangguan Mental",
         "cesdr_total": "CESD-R Total Skor (0-60)",
         "psqi_total": "PSQI Total Skor (0-21)",
-        "mos_total": "MOS-SSS Total Skor (8-40)",
-        "bullying_total": "Bullying Total Skor (0-24)",
-        "relig_total": "Religiusitas Total Skor (8-40)",
+        "mos_total": "MOS-SSS Total Skor (10-50)",
+        "gbs_total": "GBS/Bullying Total Skor (0-12)",
+        "climate_total": "Climate School Total Skor (8-32, reverse-scored)",
+        "relig_total": "Religiusitas Total Skor (8-32)",
+        "screentime_total": "Screen Time Total (deskriptif, 0-17, bukan skala baku)",
     }
     for i in range(1, 21):
         labels[f"cesdr_{i}"] = f"CESD-R Item {i} (0-3)"
-    for i in range(1, 9):
+    for i in range(1, 11):
         labels[f"mos_{i}"] = f"MOS-SSS Item {i} (1-5)"
-        labels[f"bl_{i}"] = f"Bullying Item {i} (0-3)"
-        labels[f"rel_{i}"] = f"Religiusitas Item {i} (1-5)"
+    for i in range(1, 5):
+        labels[f"gbs_{i}"] = f"GBS Item {i} (0-3)"
+    for i in range(1, 9):
+        labels[f"climate_{i}"] = f"Climate School Item {i} (=item {i+4} kuesioner asli, 1-4, raw belum reverse-scored)"
+        labels[f"rel_{i}"] = f"Religiusitas Item {i} (1-4)"
+    labels["st_weekdayScreen"] = "Screen time hari sekolah (0-4)"
+    labels["st_weekendScreen"] = "Screen time akhir pekan (0-4)"
+    labels["st_socialCompare"] = "Perbandingan sosial di medsos (0-4)"
+    labels["st_cyberbullying"] = "Cyberbullying (0-2)"
+    labels["st_sleepDelay"] = "Gadget menunda tidur (0-3)"
+    labels["st_platforms"] = "Platform medsos (gabungan, pisah titik-koma)"
+    labels["psqi_bedtime"] = "Jam mulai tidur"
+    labels["psqi_waketime"] = "Jam bangun"
+    labels["psqi_c1_subjectiveQuality"] = "PSQI C1 Kualitas Subjektif (0-3)"
+    labels["psqi_c2_sleepLatency"] = "PSQI C2 Latensi Tidur (0-3)"
+    labels["psqi_c3_sleepDuration"] = "PSQI C3 Durasi Tidur (0-3)"
+    labels["psqi_c4_sleepEfficiency"] = "PSQI C4 Efisiensi Tidur (0-3)"
+    labels["psqi_c5_sleepDisturbance"] = "PSQI C5 Gangguan Tidur (0-3)"
+    labels["psqi_c6_sleepMedication"] = "PSQI C6 Obat Tidur (0-3)"
+    labels["psqi_c7_daytimeDysfunction"] = "PSQI C7 Disfungsi Siang Hari (0-3)"
 
     # Write .sav to a temp file, then read and output to stdout
     import tempfile

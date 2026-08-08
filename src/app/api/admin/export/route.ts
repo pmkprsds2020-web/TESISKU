@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
+import { scorePsqi, scoreClimateSchool, scoreScreenTime } from "@/lib/scoring"
 
 // GET /api/admin/export?format=csv|json
+//
+// NOTE (perbaikan): PSQI dulu hanya mengekspor 5 kolom tetap (termasuk
+// melewatkan "daySleepiness" yang sudah lama ada), sehingga 9 item baru
+// (5a-5j, obat tidur, item C7 kedua) tidak pernah ikut ekspor. Sekarang
+// seluruh item PSQI diekspor secara dinamis (generic spread), sama seperti
+// MOS/Bullying yang sudah generik sejak awal. "Bullying" juga dipisah jadi
+// gbs_* (item 1-4) dan climate_* (item 5-12, dilabeli ulang 1-8) supaya
+// jelas ini dua instrumen berbeda — lihat penjelasan yang sama di
+// export-sav/route.ts.
 export async function GET(req: NextRequest) {
   const admin = await getAdminCookie()
   if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
@@ -28,10 +38,22 @@ export async function GET(req: NextRequest) {
     const demo = r.demographic ? (JSON.parse(r.demographic.data) as Record<string, string>) : {}
     const cesdr = r.cesdr ? (JSON.parse(r.cesdr.answers) as Record<string, number>) : {}
     const psqi = r.psqi ? (JSON.parse(r.psqi.answers) as Record<string, string | number>) : {}
-    const st = r.screentime ? (JSON.parse(r.screentime.answers) as Record<string, number>) : {}
+    const st = r.screentime ? (JSON.parse(r.screentime.answers) as Record<string, number | number[]>) : {}
     const mos = r.mos ? (JSON.parse(r.mos.answers) as Record<string, number>) : {}
     const bl = r.bullying ? (JSON.parse(r.bullying.answers) as Record<string, number>) : {}
     const rel = r.religiosity ? (JSON.parse(r.religiosity.answers) as Record<string, number>) : {}
+
+    const psqiComponents = r.psqi ? scorePsqi(psqi).components : null
+    const climate = r.bullying ? scoreClimateSchool(bl) : null
+    const screenTime = r.screentime ? scoreScreenTime(st) : null
+
+    const gbsEntries: Record<string, number | string> = {}
+    const climateEntries: Record<string, number | string> = {}
+    for (const [k, v] of Object.entries(bl)) {
+      const n = Number(k)
+      if (n >= 1 && n <= 4) gbsEntries[`gbs_${n}`] = v
+      else if (n >= 5 && n <= 12) climateEntries[`climate_${n - 4}`] = v
+    }
 
     return {
       code: r.code,
@@ -56,21 +78,30 @@ export async function GET(req: NextRequest) {
       // CESD-R items
       ...Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`cesdr_${i + 1}`, cesdr[i + 1] ?? ""])),
       cesdr_total: r.cesdr?.totalScore ?? "",
-      // PSQI
-      psqi_bedtime: psqi.bedtime ?? "",
-      psqi_waketime: psqi.waketime ?? "",
-      psqi_sleepLatency: psqi.sleepLatency ?? "",
-      psqi_actualSleep: psqi.actualSleep ?? "",
-      psqi_sleepQuality: psqi.sleepQuality ?? "",
+      // PSQI — seluruh item (dinamis, bukan daftar tetap) + breakdown komponen C1-C7
+      ...Object.fromEntries(Object.entries(psqi).map(([k, v]) => [`psqi_${k}`, v ?? ""])),
+      ...(psqiComponents ? {
+        psqi_c1_subjectiveQuality: psqiComponents.c1_subjectiveQuality,
+        psqi_c2_sleepLatency: psqiComponents.c2_sleepLatency,
+        psqi_c3_sleepDuration: psqiComponents.c3_sleepDuration,
+        psqi_c4_sleepEfficiency: psqiComponents.c4_sleepEfficiency,
+        psqi_c5_sleepDisturbance: psqiComponents.c5_sleepDisturbance,
+        psqi_c6_sleepMedication: psqiComponents.c6_sleepMedication,
+        psqi_c7_daytimeDysfunction: psqiComponents.c7_daytimeDysfunction,
+      } : {}),
       psqi_total: r.psqi?.totalScore ?? "",
-      // Screen time
-      ...Object.fromEntries(Object.entries(st).map(([k, v]) => [`st_${k}`, v])),
-      // MOS
+      // Screen time (deskriptif, bukan skala baku)
+      ...Object.fromEntries(Object.entries(st).map(([k, v]) => [`st_${k}`, Array.isArray(v) ? v.join(";") : v])),
+      screentime_total: screenTime?.total ?? "",
+      // MOS-SSS (10 item)
       ...Object.fromEntries(Object.entries(mos).map(([k, v]) => [`mos_${k}`, v])),
       mos_total: r.mos?.totalScore ?? "",
-      // Bullying
-      ...Object.fromEntries(Object.entries(bl).map(([k, v]) => [`bl_${k}`, v])),
-      bullying_total: r.bullying?.victimScore ?? "",
+      // GBS (Bullying, item 1-4)
+      ...gbsEntries,
+      gbs_total: r.bullying?.victimScore ?? "",
+      // Climate School (item 5-12, dilabeli ulang 1-8)
+      ...climateEntries,
+      climate_total: climate?.total ?? "",
       // Religiosity
       ...Object.fromEntries(Object.entries(rel).map(([k, v]) => [`rel_${k}`, v])),
       religiosity_total: r.religiosity?.totalScore ?? "",

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
+import { climateScoreFromBullyingRelation } from "@/lib/scoring"
 
 // POST /api/admin/cluster
 // Body: { variables: string[], k: number }
@@ -10,7 +11,7 @@ export async function POST(req: NextRequest) {
   if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { variables, k: kInput } = await req.json()
-  const validVars = ["cesdr", "psqi", "mos", "bullying", "religiosity"]
+  const validVars = ["cesdr", "psqi", "mos", "bullying", "climate", "religiosity"]
   if (!Array.isArray(variables) || variables.length < 2) {
     return NextResponse.json({ error: "Minimal 2 variabel diperlukan" }, { status: 400 })
   }
@@ -39,7 +40,8 @@ export async function POST(req: NextRequest) {
       case "cesdr": return r.cesdr?.totalScore ?? null
       case "psqi": return r.psqi?.totalScore ?? null
       case "mos": return r.mos?.totalScore ?? null
-      case "bullying": return r.bullying?.victimScore ?? null
+      case "bullying": return r.bullying?.victimScore ?? null // GBS (item 1-4)
+      case "climate": return climateScoreFromBullyingRelation(r.bullying) // Climate School (item 5-12)
       case "religiosity": return r.religiosity?.totalScore ?? null
       default: return null
     }
@@ -203,7 +205,8 @@ export async function POST(req: NextRequest) {
     cesdr: "CESD-R",
     psqi: "PSQI",
     mos: "MOS",
-    bullying: "Bullying",
+    bullying: "Bullying (GBS)",
+    climate: "Climate School",
     religiosity: "Religiusitas",
   }
 
@@ -218,7 +221,12 @@ export async function POST(req: NextRequest) {
 
     if (cesdr >= 20 && psqi >= 8) return "Rentan Depresi"
     if (cesdr <= 10 && mos >= 25 && relig >= 30) return "Sehat Mental"
-    if (bullying >= 8 && cesdr >= 15) return "Korban Bullying"
+    // NOTE (perbaikan): threshold ini dulu 8 dari saat "bullying" masih
+    // gabungan GBS+Climate School (range 0-24, jadi 8 ≈ 33%). Sekarang
+    // "bullying" = GBS saja (range 0-12, lihat SCORE_RANGES.gbs di
+    // src/lib/instruments.ts) sehingga threshold disesuaikan ke 5 (cutoff
+    // "sedang-berat" yang sama dipakai interpretGBS() di interpretation.ts).
+    if (bullying >= 5 && cesdr >= 15) return "Korban Bullying"
     if (mos <= 20 && cesdr >= 15) return "Kurang Dukungan"
     if (relig >= 30 && cesdr <= 15) return "Religius Sehat"
     return `Klaster ${profile.cluster}`

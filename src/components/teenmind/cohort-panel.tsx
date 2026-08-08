@@ -10,6 +10,7 @@ import {
   ResponsiveContainer, ErrorBar, Cell,
 } from 'recharts'
 import { Loader2, FlaskConical, Users, TrendingUp, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { SCORE_RANGES } from '@/lib/instruments'
 import { CrosstabPanel } from '@/components/teenmind/crosstab-panel'
 import { RegressionPanel } from '@/components/teenmind/regression-panel'
 import { ReliabilityPanel } from '@/components/teenmind/reliability-panel'
@@ -58,12 +59,16 @@ const GROUP_OPTIONS = [
   { value: 'classGrade', label: 'Kelas' },
 ]
 
+// NOTE (perbaikan): max di bawah dulu salah untuk mos (40, seharusnya 50),
+// bullying (24, dari saat masih gabungan GBS+Climate — sekarang GBS saja
+// jadi 12), dan religiosity (40, seharusnya 32). Sekarang diambil dari
+// SCORE_RANGES (satu sumber kebenaran) di src/lib/instruments.ts.
 const METRIC_OPTIONS = [
-  { value: 'cesdr', label: 'CESD-R (Depresi)', color: '#fb7185', max: 60 },
-  { value: 'psqi', label: 'PSQI (Tidur)', color: '#a5b4fc', max: 21 },
-  { value: 'mos', label: 'MOS-SSS (Dukungan)', color: '#fcd34d', max: 40 },
-  { value: 'bullying', label: 'Bullying', color: '#fdba74', max: 24 },
-  { value: 'religiosity', label: 'Religiusitas', color: '#86efac', max: 40 },
+  { value: 'cesdr', label: 'CESD-R (Depresi)', color: '#fb7185', max: SCORE_RANGES.cesdr.max },
+  { value: 'psqi', label: 'PSQI (Tidur)', color: '#a5b4fc', max: SCORE_RANGES.psqi.max },
+  { value: 'mos', label: 'MOS-SSS (Dukungan)', color: '#fcd34d', max: SCORE_RANGES.mos.max },
+  { value: 'bullying', label: 'Bullying (GBS)', color: '#fdba74', max: SCORE_RANGES.gbs.max },
+  { value: 'religiosity', label: 'Religiusitas', color: '#86efac', max: SCORE_RANGES.religiosity.max },
 ]
 
 const CHART_COLORS = ['#7dd3c0', '#a5b4fc', '#fcd34d', '#f9a8d4', '#86efac', '#fdba74']

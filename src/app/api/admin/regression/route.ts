@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
+import { climateScoreFromBullyingRelation } from "@/lib/scoring"
 
 // POST /api/admin/regression
-// Body: { outcome: "cesdr"|"psqi"|"mos"|"bullying"|"religiosity", predictors: string[] }
+// Body: { outcome: "cesdr"|"psqi"|"mos"|"bullying"|"climate"|"religiosity", predictors: string[] }
 // Returns: multiple linear regression coefficients, R², F-test, p-values
 export async function POST(req: NextRequest) {
   const admin = await getAdminCookie()
   if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { outcome, predictors } = await req.json()
-  const validMetrics = ["cesdr", "psqi", "mos", "bullying", "religiosity"]
-  const validPredictors = ["psqi", "mos", "bullying", "religiosity", "age"]
+  const validMetrics = ["cesdr", "psqi", "mos", "bullying", "climate", "religiosity"]
+  const validPredictors = ["psqi", "mos", "bullying", "climate", "religiosity", "age"]
 
   if (!validMetrics.includes(outcome) || !Array.isArray(predictors) || predictors.length < 1) {
     return NextResponse.json({ error: "Invalid parameters" }, { status: 400 })
@@ -40,7 +41,8 @@ export async function POST(req: NextRequest) {
       case "cesdr": return r.cesdr?.totalScore ?? null
       case "psqi": return r.psqi?.totalScore ?? null
       case "mos": return r.mos?.totalScore ?? null
-      case "bullying": return r.bullying?.victimScore ?? null
+      case "bullying": return r.bullying?.victimScore ?? null // GBS (item 1-4)
+      case "climate": return climateScoreFromBullyingRelation(r.bullying) // Climate School (item 5-12)
       case "religiosity": return r.religiosity?.totalScore ?? null
       case "age": {
         const demo = r.demographic ? (JSON.parse(r.demographic.data) as Record<string, string>) : {}
@@ -193,7 +195,8 @@ export async function POST(req: NextRequest) {
 const PREDICTOR_LABELS: Record<string, string> = {
   psqi: "PSQI (Tidur)",
   mos: "MOS-SSS (Dukungan)",
-  bullying: "Bullying",
+  bullying: "Bullying (GBS)",
+  climate: "Climate School",
   religiosity: "Religiusitas",
   age: "Usia",
 }

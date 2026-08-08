@@ -7,6 +7,7 @@ import {
   scoreClimateSchool,
   scoreReligiosity,
   scoreScreenTime,
+  climateScoreFromBullyingRelation,
 } from "../scoring"
 
 describe("scoreCesdr", () => {
@@ -269,5 +270,22 @@ describe("scoreScreenTime", () => {
 
   it("treats missing fields as 0", () => {
     expect(scoreScreenTime({}).total).toBe(0)
+  })
+})
+
+describe("climateScoreFromBullyingRelation", () => {
+  it("returns null when the relation is null/undefined", () => {
+    expect(climateScoreFromBullyingRelation(null)).toBeNull()
+    expect(climateScoreFromBullyingRelation(undefined)).toBeNull()
+  })
+
+  it("parses the JSON answers and computes the Climate School total (item 5-12 only)", () => {
+    const answers = { 1: 3, 2: 3, 3: 3, 4: 3, 5: 1, 6: 1, 7: 1, 8: 1, 9: 4, 10: 4, 11: 1, 12: 1 } // GBS items ignored, best-case climate
+    const result = climateScoreFromBullyingRelation({ answers: JSON.stringify(answers) })
+    expect(result).toBe(8) // matches scoreClimateSchool's minimum total
+  })
+
+  it("returns null on malformed JSON instead of throwing", () => {
+    expect(climateScoreFromBullyingRelation({ answers: "not json" })).toBeNull()
   })
 })

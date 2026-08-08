@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
+import { climateScoreFromBullyingRelation } from "@/lib/scoring"
 
 // POST /api/admin/compare — get scores for multiple respondents for comparison
 // Body: { codes: ["SMP001001", "SMP001002", ...] }
@@ -42,7 +43,8 @@ export async function POST(req: NextRequest) {
         cesdr: r.cesdr?.totalScore ?? null,
         psqi: r.psqi?.totalScore ?? null,
         mos: r.mos?.totalScore ?? null,
-        bullying: r.bullying?.victimScore ?? null,
+        bullying: r.bullying?.victimScore ?? null, // GBS (item 1-4)
+        climate: climateScoreFromBullyingRelation(r.bullying), // Climate School (item 5-12)
         religiosity: r.religiosity?.totalScore ?? null,
       },
     }

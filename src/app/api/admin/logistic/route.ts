@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
+import { climateScoreFromBullyingRelation } from "@/lib/scoring"
 
 // POST /api/admin/logistic
 // Body: { predictors: string[] }
@@ -10,7 +11,7 @@ export async function POST(req: NextRequest) {
   if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { predictors } = await req.json()
-  const validPredictors = ["psqi", "mos", "bullying", "religiosity", "age"]
+  const validPredictors = ["psqi", "mos", "bullying", "climate", "religiosity", "age"]
   if (!Array.isArray(predictors) || predictors.length === 0) {
     return NextResponse.json({ error: "No predictors" }, { status: 400 })
   }
@@ -35,7 +36,8 @@ export async function POST(req: NextRequest) {
     switch (metric) {
       case "psqi": return r.psqi?.totalScore ?? null
       case "mos": return r.mos?.totalScore ?? null
-      case "bullying": return r.bullying?.victimScore ?? null
+      case "bullying": return r.bullying?.victimScore ?? null // GBS (item 1-4)
+      case "climate": return climateScoreFromBullyingRelation(r.bullying) // Climate School (item 5-12)
       case "religiosity": return r.religiosity?.totalScore ?? null
       case "age": {
         const demo = r.demographic ? (JSON.parse(r.demographic.data) as Record<string, string>) : {}
@@ -212,7 +214,8 @@ export async function POST(req: NextRequest) {
   const PREDICTOR_LABELS: Record<string, string> = {
     psqi: "PSQI (Tidur)",
     mos: "MOS-SSS (Dukungan)",
-    bullying: "Bullying",
+    bullying: "Bullying (GBS)",
+    climate: "Climate School",
     religiosity: "Religiusitas",
     age: "Usia",
   }

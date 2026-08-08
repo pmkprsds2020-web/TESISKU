@@ -58,6 +58,7 @@ describe("buildScreeningAnalysis / buildConclusion / buildClinicalNarrative / bu
       gbs: 6,
       bullyingAnswers: { 5: 4, 6: 4, 7: 4, 8: 4, 9: 1, 10: 1, 11: 4, 12: 4 }, // worst case climate
       religiosity: 12,
+      screenTimeAnswers: { weekdayScreen: 4, weekendScreen: 4, socialCompare: 4, cyberbullying: 2, sleepDelay: 3 }, // worst case screen time
     })
 
     expect(analysis.find((a) => a.key === "cesdr")?.warn).toBe(true)
@@ -66,6 +67,7 @@ describe("buildScreeningAnalysis / buildConclusion / buildClinicalNarrative / bu
     expect(analysis.find((a) => a.key === "gbs")?.warn).toBe(true)
     expect(analysis.find((a) => a.key === "climate")?.warn).toBe(true)
     expect(analysis.find((a) => a.key === "religiosity")?.warn).toBe(true)
+    expect(analysis.find((a) => a.key === "screentime")?.warn).toBe(true)
 
     const conclusion = buildConclusion(analysis)
     expect(conclusion.length).toBeGreaterThan(0)
@@ -90,6 +92,7 @@ describe("buildScreeningAnalysis / buildConclusion / buildClinicalNarrative / bu
       gbs: 0,
       bullyingAnswers: { 5: 1, 6: 1, 7: 1, 8: 1, 9: 4, 10: 4, 11: 1, 12: 1 }, // best case climate
       religiosity: 28,
+      screenTimeAnswers: { weekdayScreen: 1, weekendScreen: 1, socialCompare: 0, cyberbullying: 0, sleepDelay: 0 }, // best case screen time
     })
     expect(analysis.every((a) => !a.warn)).toBe(true)
     const recs = buildRecommendations(analysis)
@@ -105,6 +108,7 @@ describe("buildScreeningAnalysis / buildConclusion / buildClinicalNarrative / bu
       gbs: null,
       bullyingAnswers: null,
       religiosity: null,
+      screenTimeAnswers: null,
     })
     expect(analysis.every((a) => a.score === null)).toBe(true)
     expect(buildConclusion(analysis)).toEqual([])

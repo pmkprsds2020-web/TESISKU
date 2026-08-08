@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { motion } from 'framer-motion'
+import { SCORE_RANGES } from '@/lib/instruments'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -69,6 +70,7 @@ type Stats = {
     psqi: { n: number; mean: number; median: number; sd: number; min: number; max: number }
     mos: { n: number; mean: number; median: number; sd: number; min: number; max: number }
     bullying: { n: number; mean: number; median: number; sd: number; min: number; max: number }
+    climate: { n: number; mean: number; median: number; sd: number; min: number; max: number }
     religiosity: { n: number; mean: number; median: number; sd: number; min: number; max: number }
   }
   correlations: Record<string, number> & { matrix?: Record<string, Record<string, number>> }
@@ -1012,12 +1014,17 @@ function ExportCard({ icon: Icon, title, desc, color, onClick }: { icon: React.E
 
 function ScoreDistribution({ respondents }: { respondents: Respondent[] }) {
   // Build histogram bins for CESD-R (0-60, bins of 10)
+  // NOTE (perbaikan): max/threshold di sini dulu salah untuk mos (40,
+  // seharusnya 50), bullying (24, dari saat masih gabungan GBS+Climate —
+  // sekarang GBS saja jadi 12, threshold "tinggi" disesuaikan dari 8 ke 5),
+  // dan religiosity (40, seharusnya 32). Sekarang diambil dari SCORE_RANGES
+  // (satu sumber kebenaran) di src/lib/instruments.ts.
   const instruments = [
-    { key: 'cesdr' as const, label: 'CESD-R (Depresi)', max: 60, binSize: 10, color: '#fb7185', thresholds: [{ v: 16, label: 'Bermakna' }] },
-    { key: 'psqi' as const, label: 'PSQI (Tidur)', max: 21, binSize: 3, color: '#a5b4fc', thresholds: [{ v: 5, label: 'Buruk' }] },
-    { key: 'mos' as const, label: 'MOS-SSS (Dukungan)', max: 40, binSize: 5, color: '#fcd34d', thresholds: [] },
-    { key: 'bullying' as const, label: 'Bullying', max: 24, binSize: 4, color: '#fdba74', thresholds: [{ v: 8, label: 'Tinggi' }] },
-    { key: 'religiosity' as const, label: 'Religiusitas', max: 40, binSize: 5, color: '#86efac', thresholds: [] },
+    { key: 'cesdr' as const, label: 'CESD-R (Depresi)', max: SCORE_RANGES.cesdr.max, binSize: 10, color: '#fb7185', thresholds: [{ v: SCORE_RANGES.cesdr.cutoff, label: 'Bermakna' }] },
+    { key: 'psqi' as const, label: 'PSQI (Tidur)', max: SCORE_RANGES.psqi.max, binSize: 3, color: '#a5b4fc', thresholds: [{ v: SCORE_RANGES.psqi.cutoff, label: 'Buruk' }] },
+    { key: 'mos' as const, label: 'MOS-SSS (Dukungan)', max: SCORE_RANGES.mos.max, binSize: 5, color: '#fcd34d', thresholds: [] },
+    { key: 'bullying' as const, label: 'Bullying (GBS)', max: SCORE_RANGES.gbs.max, binSize: 2, color: '#fdba74', thresholds: [{ v: SCORE_RANGES.gbs.cutoff, label: 'Tinggi' }] },
+    { key: 'religiosity' as const, label: 'Religiusitas', max: SCORE_RANGES.religiosity.max, binSize: 4, color: '#86efac', thresholds: [] },
   ]
 
   const completed = respondents.filter(r => r.scores.cesdr !== null)

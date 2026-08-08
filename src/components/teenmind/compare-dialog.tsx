@@ -12,6 +12,7 @@ import {
   ResponsiveContainer, Legend, Tooltip,
 } from 'recharts'
 import { Loader2, GitCompare, X, Users } from 'lucide-react'
+import { SCORE_RANGES } from '@/lib/instruments'
 
 type CompareRespondent = {
   code: string
@@ -25,19 +26,25 @@ type CompareRespondent = {
     cesdr: number | null
     psqi: number | null
     mos: number | null
-    bullying: number | null
+    bullying: number | null // GBS (item 1-4) saja
+    climate: number | null // Climate School (item 5-12)
     religiosity: number | null
   }
 }
 
 const COMPARE_COLORS = ['#7dd3c0', '#a5b4fc', '#fcd34d', '#f9a8d4', '#86efac', '#fdba74']
 
+// NOTE (perbaikan): max di bawah dulu salah untuk mos (40, seharusnya 50),
+// bullying (24, dari saat masih gabungan GBS+Climate — sekarang GBS saja
+// jadi 12), dan religiosity (40, seharusnya 32). Sekarang diambil dari
+// SCORE_RANGES (satu sumber kebenaran) di src/lib/instruments.ts.
 const DIMENSIONS = [
-  { key: 'cesdr', name: 'Depresi', max: 60, invert: true },
-  { key: 'psqi', name: 'Gangguan Tidur', max: 21, invert: true },
-  { key: 'mos', name: 'Dukungan Sosial', max: 40, invert: false },
-  { key: 'bullying', name: 'Bullying', max: 24, invert: true },
-  { key: 'religiosity', name: 'Religiusitas', max: 40, invert: false },
+  { key: 'cesdr', name: 'Depresi', max: SCORE_RANGES.cesdr.max, invert: true },
+  { key: 'psqi', name: 'Gangguan Tidur', max: SCORE_RANGES.psqi.max, invert: true },
+  { key: 'mos', name: 'Dukungan Sosial', max: SCORE_RANGES.mos.max, invert: false },
+  { key: 'bullying', name: 'Bullying (GBS)', max: SCORE_RANGES.gbs.max, invert: true },
+  { key: 'climate', name: 'Climate School', max: SCORE_RANGES.climate.max, invert: true },
+  { key: 'religiosity', name: 'Religiusitas', max: SCORE_RANGES.religiosity.max, invert: false },
 ] as const
 
 export function CompareDialog({
@@ -206,7 +213,7 @@ export function CompareDialog({
                           <span className="text-[10px] text-muted-foreground">/40</span>
                         </td>
                         <td className="px-2 py-2.5 text-center">
-                          <span className={`font-bold ${(r.scores.bullying ?? 0) >= 8 ? 'text-orange-600' : ''}`}>
+                          <span className={`font-bold ${(r.scores.bullying ?? 0) >= SCORE_RANGES.gbs.cutoff ? 'text-orange-600' : ''}`}>
                             {r.scores.bullying ?? '—'}
                           </span>
                           <span className="text-[10px] text-muted-foreground">/24</span>

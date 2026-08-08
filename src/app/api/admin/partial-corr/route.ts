@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
+import { climateScoreFromBullyingRelation } from "@/lib/scoring"
 
 // POST /api/admin/partial-corr
 // Body: { x: string, y: string, controls: string[] }
@@ -10,7 +11,7 @@ export async function POST(req: NextRequest) {
   if (!admin) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { x: xVar, y: yVar, controls } = await req.json()
-  const valid = ["cesdr", "psqi", "mos", "bullying", "religiosity", "age"]
+  const valid = ["cesdr", "psqi", "mos", "bullying", "climate", "religiosity", "age"]
   if (!valid.includes(xVar) || !valid.includes(yVar)) {
     return NextResponse.json({ error: "Invalid variables" }, { status: 400 })
   }
@@ -29,7 +30,8 @@ export async function POST(req: NextRequest) {
       case "cesdr": return r.cesdr?.totalScore ?? null
       case "psqi": return r.psqi?.totalScore ?? null
       case "mos": return r.mos?.totalScore ?? null
-      case "bullying": return r.bullying?.victimScore ?? null
+      case "bullying": return r.bullying?.victimScore ?? null // GBS (item 1-4)
+      case "climate": return climateScoreFromBullyingRelation(r.bullying) // Climate School (item 5-12)
       case "religiosity": return r.religiosity?.totalScore ?? null
       case "age": {
         const demo = r.demographic ? (JSON.parse(r.demographic.data) as Record<string, string>) : {}
@@ -116,7 +118,7 @@ export async function POST(req: NextRequest) {
   // Semi-partial correlation (unique contribution of X to Y)
   // From the residuals approach
   const VAR_LABELS: Record<string, string> = {
-    cesdr: "CESD-R", psqi: "PSQI", mos: "MOS", bullying: "Bullying", religiosity: "Religiusitas", age: "Usia",
+    cesdr: "CESD-R", psqi: "PSQI", mos: "MOS", bullying: "Bullying (GBS)", climate: "Climate School", religiosity: "Religiusitas", age: "Usia",
   }
 
   return NextResponse.json({

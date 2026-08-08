@@ -503,3 +503,25 @@ export const STAGES: { id: StageId; title: string; subtitle: string; icon: strin
 ]
 
 export const TOTAL_ESTIMATED_MINUTES = STAGES.reduce((a, s) => a + s.estimatedMinutes, 0)
+
+// ============================================================
+// Rentang skor total resmi per instrumen — SATU SUMBER KEBENARAN untuk
+// nilai maksimum sumbu grafik, threshold highlight, dsb di seluruh
+// dashboard admin. Sebelumnya nilai-nilai ini di-hardcode berulang di
+// banyak file (admin-dashboard.tsx, compare-dialog.tsx, cohort-panel.tsx,
+// cluster/route.ts) dan beberapa di antaranya SALAH (mis. MOS-SSS ditulis
+// max 40 padahal 10 item x maks 5 = 50; Bullying ditulis max 24 dari saat
+// GBS+Climate masih tercampur jadi satu skor, padahal GBS sendiri cuma
+// 0-12; Religiusitas ditulis max 40 padahal 8 item x maks 4 = 32).
+// Import dari sini di komponen dashboard/analisis alih-alih menulis angka
+// literal baru, supaya tidak terulang lagi.
+// ============================================================
+export const SCORE_RANGES = {
+  cesdr: { min: 0, max: 60, cutoff: 16, cutoffLabel: "Bermakna" },
+  psqi: { min: 0, max: 21, cutoff: 5, cutoffLabel: "Buruk (>5)" },
+  mos: { min: 10, max: 50, cutoff: 25, cutoffLabel: "Rendah (≤25)" },
+  gbs: { min: 0, max: 12, cutoff: 5, cutoffLabel: "Sedang-berat (≥5)" },
+  climate: { min: 8, max: 32, cutoff: 16, cutoffLabel: "Kurang supportif (>16)" },
+  religiosity: { min: 8, max: 32, cutoff: 20, cutoffLabel: "Kurang (<20)" },
+  screentime: { min: 0, max: 17, cutoff: null, cutoffLabel: "Deskriptif, bukan skala baku" },
+} as const

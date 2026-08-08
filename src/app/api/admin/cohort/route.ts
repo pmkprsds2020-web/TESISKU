@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
+import { climateScoreFromBullyingRelation } from "@/lib/scoring"
 
 // POST /api/admin/cohort
-// Body: { groupBy: "school"|"gender"|"age"|"classGrade", metric: "cesdr"|"psqi"|"mos"|"bullying"|"religiosity" }
+// Body: { groupBy: "school"|"gender"|"age"|"classGrade", metric: "cesdr"|"psqi"|"mos"|"bullying"|"climate"|"religiosity" }
 // Returns: group stats (n, mean, sd, se) + significance test (t-test for 2 groups, ANOVA for 3+)
 export async function POST(req: NextRequest) {
   const admin = await getAdminCookie()
@@ -11,7 +12,7 @@ export async function POST(req: NextRequest) {
 
   const { groupBy, metric } = await req.json()
   const validGroupBy = ["school", "gender", "age", "classGrade"]
-  const validMetrics = ["cesdr", "psqi", "mos", "bullying", "religiosity"]
+  const validMetrics = ["cesdr", "psqi", "mos", "bullying", "climate", "religiosity"]
 
   if (!validGroupBy.includes(groupBy) || !validMetrics.includes(metric)) {
     return NextResponse.json({ error: "Invalid groupBy or metric" }, { status: 400 })
@@ -35,7 +36,8 @@ export async function POST(req: NextRequest) {
       case "cesdr": return r.cesdr?.totalScore ?? null
       case "psqi": return r.psqi?.totalScore ?? null
       case "mos": return r.mos?.totalScore ?? null
-      case "bullying": return r.bullying?.victimScore ?? null
+      case "bullying": return r.bullying?.victimScore ?? null // GBS (item 1-4)
+      case "climate": return climateScoreFromBullyingRelation(r.bullying) // Climate School (item 5-12)
       case "religiosity": return r.religiosity?.totalScore ?? null
       default: return null
     }

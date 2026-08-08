@@ -42,14 +42,16 @@ const OUTCOME_OPTIONS = [
   { value: 'cesdr', label: 'CESD-R (Depresi)' },
   { value: 'psqi', label: 'PSQI (Tidur)' },
   { value: 'mos', label: 'MOS-SSS (Dukungan)' },
-  { value: 'bullying', label: 'Bullying' },
+  { value: 'bullying', label: 'Bullying (GBS)' },
+  { value: 'climate', label: 'Climate School' },
   { value: 'religiosity', label: 'Religiusitas' },
 ]
 
 const PREDICTOR_OPTIONS = [
   { value: 'psqi', label: 'PSQI (Tidur)' },
   { value: 'mos', label: 'MOS-SSS (Dukungan)' },
-  { value: 'bullying', label: 'Bullying' },
+  { value: 'bullying', label: 'Bullying (GBS)' },
+  { value: 'climate', label: 'Climate School' },
   { value: 'religiosity', label: 'Religiusitas' },
   { value: 'age', label: 'Usia' },
 ]

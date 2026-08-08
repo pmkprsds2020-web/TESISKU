@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { getAdminCookie } from "@/lib/auth"
+import { climateScoreFromBullyingRelation } from "@/lib/scoring"
 
 // POST /api/admin/ai-analytics
 // Generates a narrative summary (Bab IV thesis style) using z-ai-web-dev-sdk
@@ -28,21 +29,12 @@ export async function POST() {
     })
   }
 
-  // Compute summary stats
-  const arr = (sel: (typeof list)[number]) => [
-    sel.cesdr?.totalScore ?? null,
-    sel.psqi?.totalScore ?? null,
-    sel.mos?.totalScore ?? null,
-    sel.bullying?.victimScore ?? null,
-    sel.religiosity?.totalScore ?? null,
-  ]
-  void arr
-
   const scores = {
     cesdr: list.map((r) => r.cesdr?.totalScore ?? 0),
     psqi: list.map((r) => r.psqi?.totalScore ?? 0),
     mos: list.map((r) => r.mos?.totalScore ?? 0),
-    bullying: list.map((r) => r.bullying?.victimScore ?? 0),
+    bullying: list.map((r) => r.bullying?.victimScore ?? 0), // GBS (item 1-4)
+    climate: list.map((r) => climateScoreFromBullyingRelation(r.bullying) ?? 0), // Climate School (item 5-12)
     religiosity: list.map((r) => r.religiosity?.totalScore ?? 0),
   }
 
@@ -95,13 +87,15 @@ export async function POST() {
       cesdr: sum(scores.cesdr),
       psqi: sum(scores.psqi),
       mos: sum(scores.mos),
-      bullying: sum(scores.bullying),
+      bullyingGBS: sum(scores.bullying),
+      climateSchool: sum(scores.climate),
       religiusitas: sum(scores.religiosity),
     },
     korelasi: {
       cesdr_psqi: corr(scores.cesdr, scores.psqi),
       cesdr_mos: corr(scores.cesdr, scores.mos),
-      cesdr_bullying: corr(scores.cesdr, scores.bullying),
+      cesdr_bullyingGBS: corr(scores.cesdr, scores.bullying),
+      cesdr_climateSchool: corr(scores.cesdr, scores.climate),
       cesdr_religiusitas: corr(scores.cesdr, scores.religiosity),
     },
   }
@@ -112,7 +106,7 @@ export async function POST() {
     "formal-akademik yang siap dimasukkan ke Bab IV (Hasil dan Pembahasan) tesis. " +
     "Sertakan: (1) gambaran umum responden, (2) statistik deskriptif tiap instrumen (rerata, min, max), " +
     "(3) interpretasi skor CESD-R (gejala depresi) dan proporsi high-risk, " +
-    "(4) korelasi CESD-R dengan PSQI, MOS-SSS, Bullying, dan Religiusitas beserta interpretasi kekuatan dan arah, " +
+    "(4) korelasi CESD-R dengan PSQI, MOS-SSS, Bullying (GBS), Climate School, dan Religiusitas beserta interpretasi kekuatan dan arah, " +
     "(5) faktor dominan, (6) rekomendasi singkat. Gunakan paragraf dan poin-poin yang rapi."
 
   const userMessage = `Berikut adalah hasil analisis penelitian biopsikososial depresi remaja SMP:\n\n${JSON.stringify(payload, null, 2)}\n\nTolong hasilkan ringkasan naratif Bab IV.`

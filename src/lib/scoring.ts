@@ -265,6 +265,23 @@ export function scoreClimateSchool(answers: BullyingAnswers): ClimateSchoolResul
   }
 }
 
+/**
+ * Helper untuk route API: menghitung skor total Climate School langsung dari
+ * field `bullying.answers` (JSON string) milik relasi Prisma, atau null bila
+ * responden belum mengisi. Dipakai di berbagai route analisis (regresi,
+ * mediasi, korelasi parsial, dst) supaya Climate School bisa dipakai sebagai
+ * variabel terpisah dari GBS tanpa menduplikasi logika parsing di tiap route.
+ */
+export function climateScoreFromBullyingRelation(bullying: { answers: string } | null | undefined): number | null {
+  if (!bullying) return null
+  try {
+    const parsed = JSON.parse(bullying.answers) as BullyingAnswers
+    return scoreClimateSchool(parsed).total
+  } catch {
+    return null
+  }
+}
+
 export type ReligiosityAnswers = Record<number, number>
 /** Skor total religiusitas (8 item, range 8-32). Cut-off: Baik ≥20, Kurang <20. */
 export function scoreReligiosity(answers: ReligiosityAnswers): number {

@@ -27,7 +27,8 @@ const VAR_OPTIONS = [
   { value: 'cesdr', label: 'CESD-R' },
   { value: 'psqi', label: 'PSQI' },
   { value: 'mos', label: 'MOS' },
-  { value: 'bullying', label: 'Bullying' },
+  { value: 'bullying', label: 'Bullying (GBS)' },
+  { value: 'climate', label: 'Climate School' },
   { value: 'religiosity', label: 'Religiusitas' },
   { value: 'age', label: 'Usia' },
 ]
