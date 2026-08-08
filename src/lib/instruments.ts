@@ -422,15 +422,15 @@ export const GBS_OPTIONS_3_4 = [
 ]
 
 // School Climate items (Bagian B) - Likert 1-4
-export const CLIMATE_ITEMS: { id: number; text: string }[] = [
-  { id: 5, text: "Saya merasa aman di sekolah." },
-  { id: 6, text: "Guru-guru di sekolahku peduli terhadap kondisi emosional siswanya." },
-  { id: 7, text: "Di sekolah, saya bisa mendapatkan bantuan jika saya mengalami masalah." },
-  { id: 8, text: "Saya merasa diterima dan dihargai oleh teman-teman di sekolah." },
-  { id: 9, text: "Tekanan belajar dan tugas di sekolah membuat saya sering merasa stres." },
-  { id: 10, text: "Saya merasa tidak suka atau takut pergi ke sekolah." },
-  { id: 11, text: "Guru-guruku mendengarkan dan menghormati pendapat murid." },
-  { id: 12, text: "Saya merasa senang dan nyaman berada di lingkungan sekolah." },
+export const CLIMATE_ITEMS: { id: number; text: string; icon: string }[] = [
+  { id: 5, text: "Saya merasa aman di sekolah.", icon: "🛡️" },
+  { id: 6, text: "Guru-guru di sekolahku peduli terhadap kondisi emosional siswanya.", icon: "❤️" },
+  { id: 7, text: "Di sekolah, saya bisa mendapatkan bantuan jika saya mengalami masalah.", icon: "🤝" },
+  { id: 8, text: "Saya merasa diterima dan dihargai oleh teman-teman di sekolah.", icon: "🫂" },
+  { id: 9, text: "Tekanan belajar dan tugas di sekolah membuat saya sering merasa stres.", icon: "😖" },
+  { id: 10, text: "Saya merasa tidak suka atau takut pergi ke sekolah.", icon: "😨" },
+  { id: 11, text: "Guru-guruku mendengarkan dan menghormati pendapat murid.", icon: "👂" },
+  { id: 12, text: "Saya merasa senang dan nyaman berada di lingkungan sekolah.", icon: "😊" },
 ]
 
 // Skala resmi pedoman instrumen: 1 = Sangat Setuju ... 4 = Sangat Tidak Setuju.
@@ -452,7 +452,7 @@ export const CLIMATE_OPTIONS: LikertOption[] = [
 export const CLIMATE_REVERSE_ITEM_IDS: number[] = [9, 10]
 
 // Combined for the BullyingScreen (backward compat)
-export const BULLYING_ITEMS = [...GBS_ITEMS, ...CLIMATE_ITEMS.map(c => ({ id: c.id, text: c.text, icon: "🏫" }))]
+export const BULLYING_ITEMS = [...GBS_ITEMS, ...CLIMATE_ITEMS]
 export const BULLYING_OPTIONS = GBS_OPTIONS_1_2 // used for GBS items 1-2
 
 // ============================================================

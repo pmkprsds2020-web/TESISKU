@@ -9,14 +9,14 @@ import { StageCompleteOverlay } from '@/components/teenmind/stage-complete-overl
 import { Confetti } from '@/components/teenmind/confetti'
 import {
   GBS_ITEMS, GBS_OPTIONS_1_2, GBS_OPTIONS_3_4,
-  CLIMATE_ITEMS, CLIMATE_OPTIONS,
+  CLIMATE_ITEMS, CLIMATE_OPTIONS, CLIMATE_REVERSE_ITEM_IDS,
 } from '@/lib/instruments'
 import type { AvatarMood } from '@/components/teenmind/avatar'
 
 // Combined items: GBS 1-4 + Climate 5-12
 const ALL_ITEMS = [
   ...GBS_ITEMS.map(g => ({ id: g.id, text: g.text, icon: g.icon, section: 'GBS' as const })),
-  ...CLIMATE_ITEMS.map(c => ({ id: c.id, text: c.text, icon: '🏫', section: 'Climate' as const })),
+  ...CLIMATE_ITEMS.map(c => ({ id: c.id, text: c.text, icon: c.icon, section: 'Climate' as const })),
 ]
 
 const TOTAL = ALL_ITEMS.length // 12
@@ -79,13 +79,30 @@ export function BullyingScreen() {
   }
 
   const options = getOptionsForItem(item.id)
+  // NOTE (perbaikan): dulu warna dihitung langsung dari `o.value` mentah.
+  // Untuk item GBS (skala 0-3) ini kebetulan benar, tapi untuk item Climate
+  // School (skala 1-4) hasilnya salah total: warna hijau (jawaban terbaik)
+  // tidak pernah muncul karena tidak ada opsi bernilai 0, dan untuk item
+  // bermuatan negatif (9 & 10 — "saya stres", "saya takut ke sekolah") arah
+  // warnanya justru terbalik (jawaban terbaik "Sangat Tidak Setuju" malah
+  // tampil merah). Sekarang dihitung lewat `badnessIndex` 0-3 yang konsisten
+  // dengan arah reverse-scoring yang sama dipakai scoreClimateSchool() di
+  // src/lib/scoring.ts, supaya warna yang dilihat responden selalu cocok
+  // dengan makna sesungguhnya dari jawaban itu.
+  const badnessIndex = (v: number): number => {
+    if (item.section === 'GBS') return v // GBS sudah 0-3, semakin tinggi semakin buruk
+    // Climate School: skala mentah 1-4. Item positif (5,6,7,8,11,12): makin
+    // tidak setuju (nilai makin besar) makin buruk → index = v - 1.
+    // Item negatif (9,10): makin setuju (nilai makin kecil) makin buruk → index = 4 - v.
+    return CLIMATE_REVERSE_ITEM_IDS.includes(item.id) ? 4 - v : v - 1
+  }
   const optWithColor = options.map(o => ({
     ...o,
-    color: o.value === 0
+    color: badnessIndex(o.value) === 0
       ? 'from-emerald-100 to-emerald-50 border-emerald-300 data-[selected=true]:border-emerald-500 data-[selected=true]:bg-emerald-100'
-      : o.value === 1
+      : badnessIndex(o.value) === 1
       ? 'from-amber-100 to-amber-50 border-amber-300 data-[selected=true]:border-amber-500 data-[selected=true]:bg-amber-100'
-      : o.value === 2
+      : badnessIndex(o.value) === 2
       ? 'from-orange-100 to-orange-50 border-orange-300 data-[selected=true]:border-orange-500 data-[selected=true]:bg-orange-100'
       : 'from-rose-100 to-rose-50 border-rose-300 data-[selected=true]:border-rose-500 data-[selected=true]:bg-rose-100',
   }))
